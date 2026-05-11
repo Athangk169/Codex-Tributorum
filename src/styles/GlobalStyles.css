@@ -1,0 +1,553 @@
+/* ── 1. CORE VARIABLES & FONTS ── */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Share+Tech+Mono&display=swap');
+
+:root {
+  /* ── Mechanicum (data / operational) ── */
+  --bg:         #010200;          /* near-black, very slight red undertone */
+  --bg-panel:   rgba(4, 1, 1, 0.9);
+  --border:     #1a5d2c;          /* Mechanicum green border */
+  --border-hi:  #4ade80;          /* bright green — positive values, ok states */
+  --text-m:     #a7f3d0;          /* bright main text */
+  --text-d:     #6ee7b7;          /* muted green text */
+  --glow:       0 0 10px rgba(74, 222, 128, 0.45);
+
+  /* ── Blood Angels (structure / chrome) ── */
+  --ba-crimson:   #cc2200;
+  --ba-crimson-d: #8B0000;
+  --ba-gold:      #c9a84c;
+  --ba-gold-dim:  #b8923e;
+  --ba-gold-mute: #7a4a20;
+  --ba-border:    #4a0a00;        /* dark crimson border for panels */
+  --ba-border-lo: #2a0800;        /* very dark crimson separator */
+  --ba-bg-panel:  rgba(8, 1, 1, 0.88);
+
+  /* ── Shared status ── */
+  --red:   #cc2200;               /* now BA crimson, not pink */
+  --amber: #eab308;
+  --mono:  'Share Tech Mono', monospace;
+}
+
+/* ── 2. GLOBAL RESET ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text-m);
+  font-family: var(--mono);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Carbon fibre texture */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background-image: url("https://www.transparenttextures.com/patterns/carbon-fibre.png");
+  opacity: 0.04;
+  pointer-events: none;
+}
+
+/* ── 3. CRT OVERLAYS ── */
+.scanlines {
+  position: fixed; inset: 0; z-index: 1000; pointer-events: none;
+  background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.22) 50%);
+  background-size: 100% 4px;
+}
+
+.vignette {
+  position: fixed; inset: 0; z-index: 1000; pointer-events: none;
+  background: radial-gradient(circle at center, transparent 80%, rgba(0,0,0,0.45) 100%);
+}
+
+/* ── 4. ROOT LAYOUT ── */
+#root {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 10;
+}
+
+/* ── 5. TICKER & FOOTER SHELL ── */
+/* Height / flex handled by components; these just ensure solid bg */
+.ticker-wrap {
+  height: 35px;
+  background: #050000;
+  border-bottom: 1px solid var(--ba-border);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.footer {
+  height: 35px;
+  background: linear-gradient(180deg, #060002, #020008);
+  border-top: 2px solid var(--border);
+  box-shadow: 0 -2px 10px rgba(180,20,0,0.2);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+/* ── 6. HEADER & NAV ── */
+.hdr {
+  height: 60px;
+  background: linear-gradient(90deg, #0e0000, #160000, #0e0000);
+  border-bottom: 1px solid var(--ba-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+
+.tactical-nav {
+  height: 47px;
+  background: linear-gradient(180deg, #060002, #04000a);
+  border-bottom: 2px solid var(--border);
+  box-shadow: 0 2px 8px rgba(180,20,0,0.25);
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* Nav buttons — base state (Mechanicum) */
+.nav-btn {
+  flex: 1;
+  border: none;
+  border-top: 2px solid transparent;
+  background: rgba(1,8,3,0.85);
+  color: var(--text-d);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+/* Active tab — Blood Angels command state */
+.nav-btn.active {
+  background:   rgba(100,5,5,0.35) !important;
+  border-top:   2px solid var(--ba-gold) !important;
+  border-bottom:none;
+  border-left:  1px solid var(--ba-crimson);
+  border-right: 1px solid var(--ba-crimson);
+  color:        #fff !important;
+  text-shadow:  0 0 10px rgba(204,34,0,0.7) !important;
+  box-shadow:   inset 0 0 14px rgba(204,34,0,0.18) !important;
+}
+
+/* ── 7. MAIN CONTENT AREA ── */
+.system-content-layer {
+  flex: 1;
+  overflow-y: auto;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 8. PANELS ── */
+.panel {
+  background: var(--ba-bg-panel);
+  border: 1px solid var(--ba-border);
+  padding: 15px;
+  position: relative;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 0 10px rgba(180,20,0,0.06);
+}
+
+/* Gold top-rule on every panel */
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #c9a84c55, #c9a84c88, #c9a84c55, transparent);
+}
+
+/* mech-panel: same as panel but keeps the Mechanicum inner border */
+.mech-panel {
+  background: linear-gradient(180deg, rgba(8,2,2,0.95) 0%, rgba(4,1,1,0.92) 100%);
+  border: 1px solid var(--ba-border);
+  border-top: 2px solid var(--ba-gold-dim);   /* gold top rule — BA chapter seal */
+  position: relative;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.7), 0 0 10px rgba(180,20,0,0.06);
+}
+
+/* ── 9. TYPOGRAPHY ── */
+.sec-ttl {
+  font-size:     12px;
+  color:         var(--ba-gold-dim);           /* gold, not green */
+  text-shadow:   0 0 8px rgba(184,146,62,0.35);
+  border-bottom: 1px solid var(--ba-border-lo);
+  padding-bottom:8px;
+  margin-bottom: 12px;
+  text-transform:uppercase;
+  letter-spacing:2px;
+  font-weight:   bold;
+}
+
+.t-item {
+  padding: 0 40px;
+  color: var(--ba-gold-mute);
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.t-item em {
+  color: #fff !important;
+  text-shadow: 0 0 10px rgba(204,34,0,0.6);
+  font-style: normal;
+  margin-left: 10px;
+}
+
+.kpi-lbl {
+  font-size:     11px;
+  color:         var(--ba-gold-dim);
+  margin-bottom: 7px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+}
+
+.kpi-val {
+  color:       #fff;
+  text-shadow: 0 0 12px var(--text-m);
+  font-size:   28px;
+  font-family: var(--mono);
+}
+
+/* ── 10. STATUS COLOURS ── */
+/* warn: BA crimson (no more pink) */
+.warn {
+  color:       var(--ba-crimson) !important;
+  text-shadow: 0 0 10px rgba(204,34,0,0.55) !important;
+}
+
+.ok {
+  color: var(--border-hi) !important;
+}
+
+.pulse {
+  animation: dangerPulse 2s infinite alternate;
+}
+
+.blink {
+  animation: blinker 1s step-start infinite;
+}
+
+.status-led {
+  display:       inline-block;
+  width:         9px;
+  height:        9px;
+  border-radius: 50%;
+}
+.status-led.ok   { background: var(--border-hi); box-shadow: var(--glow); }
+.status-led.warn { background: var(--ba-crimson); box-shadow: 0 0 8px var(--ba-crimson); }
+
+/* ── 11. RADAR ── */
+.radar-wrap {
+  border:       1px solid var(--border);
+  border-radius:50%;
+  position:     relative;
+  overflow:     hidden;
+  background:   rgba(0,10,0,0.6);
+  box-shadow:   0 0 20px rgba(26,93,44,0.25) inset;
+  display:      flex;
+  align-items:  center;
+  justify-content:center;
+}
+
+.radar-grid {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, rgba(26,93,44,0.35) 1px, transparent 1px) 50% 50% / 20px 20px,
+    linear-gradient(rgba(26,93,44,0.35) 1px, transparent 1px) 50% 50% / 20px 20px;
+  border-radius: 50%;
+}
+
+.radar-sweep {
+  position:  absolute; inset: 0;
+  background:conic-gradient(from 0deg, transparent 70%, rgba(74,222,128,0.45) 100%);
+  animation: radarSpin 4s linear infinite;
+  border-radius:50%;
+}
+
+.radar-core {
+  position:    relative;
+  z-index:     10;
+  color:       var(--border-hi);
+  font-weight: bold;
+  letter-spacing:2px;
+  text-shadow: var(--glow);
+}
+
+/* ── 12. DATA BARS ── */
+.bar-track {
+  background: rgba(0,15,0,0.4);
+  border:     1px solid var(--border);
+  width:      100%;
+  overflow:   hidden;
+}
+
+.bar-fill {
+  height:     100%;
+  background: var(--text-d);
+  box-shadow: var(--glow);
+  transition: width 0.5s ease-in-out;
+}
+
+/* ── 13. TABLES ── */
+.investment-table { border-collapse: collapse; }
+
+.investment-table th {
+  text-align:   left;
+  color:        var(--ba-gold-dim);
+  font-weight:  normal;
+  border-bottom:1px solid var(--ba-border);
+  padding-bottom:10px;
+  font-size:    12px;
+}
+
+.investment-table td {
+  padding:      10px 0;
+  border-bottom:1px dotted rgba(74,10,0,0.35);
+}
+
+.profit-pos { color: var(--text-m); }
+.profit-neg { color: var(--ba-crimson); }
+
+.row { display: flex; justify-content: space-between; padding: 8px 0; }
+.rl  { color: var(--ba-gold-dim); font-size: 12px; }
+.rv  { color: var(--text-m); font-weight: bold; }
+
+.echo-stream p {
+  margin-bottom: 8px;
+  font-family:   var(--mono);
+  color:         var(--text-d);
+  opacity:       0.8;
+}
+
+/* ── 14. ANIMATION ENGINE ── */
+.ticker-track, .act-track {
+  display:   flex;
+  width:     max-content;
+  animation: marquee 45s linear infinite;
+}
+
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes radarSpin  { 100% { transform: rotate(360deg); } }
+
+@keyframes corePulse  {
+  0%,100% { opacity: 0.9; }
+  50%     { opacity: 0.35; }
+}
+
+@keyframes dangerPulse {
+  0%   { opacity: 1;   color: #ff6644; text-shadow: 0 0 18px rgba(204,34,0,0.8); }
+  100% { opacity: 0.2; color: var(--ba-crimson); text-shadow: none; }
+}
+
+@keyframes blinker { 50% { opacity: 0; } }
+
+@keyframes ledPulseOk {
+  0%   { box-shadow: 0 0 4px #4ade80; }
+  100% { box-shadow: 0 0 12px #4ade80, 0 0 20px #4ade8066; }
+}
+
+/* ── 15. VERTICAL LOG SCROLL ── */
+.v-scroll-wrap {
+  flex:       1;
+  overflow:   hidden;
+  position:   relative;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+  mask-image:         linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+}
+
+.v-scroll-inner {
+  display:        flex;
+  flex-direction: column;
+  animation:      vScroll 30s linear infinite;
+}
+
+@keyframes vScroll {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+
+.log-row {
+  display:        flex;
+  justify-content:space-between;
+  font-size:      11px;
+  padding:        8px 0;
+  border-bottom:  1px dashed rgba(74,10,0,0.3);
+}
+
+/* ── 16. NOOSPHERE RELAY BADGES ── */
+.n-badge {
+  display:         inline-flex;
+  align-items:     center;
+  justify-content: center;
+  padding:         2px 6px;
+  font-weight:     bold;
+  font-size:       10px;
+  border-radius:   2px;
+  letter-spacing:  1px;
+  width:           40px;
+  flex-shrink:     0;
+}
+
+/* TX badge: keep sky-blue — neutral data tag */
+.n-badge-tx {
+  background: rgba(56,189,248,0.12);
+  border:     1px solid #38bdf8;
+  color:      #38bdf8;
+}
+
+/* OK badge: Mechanicum green */
+.n-badge-ok {
+  background: rgba(74,222,128,0.12);
+  border:     1px solid #4ade80;
+  color:      #4ade80;
+}
+
+/* CRIT badge: Blood Angels crimson */
+.n-badge-crit {
+  background: rgba(204,34,0,0.15);
+  border:     1px solid var(--ba-crimson);
+  color:      var(--ba-crimson);
+  text-shadow:0 0 6px rgba(204,34,0,0.7);
+  animation:  dangerPulse 1.5s infinite alternate;
+}
+
+.relay-row {
+  display:     flex;
+  gap:         12px;
+  font-size:   10px;
+  padding:     10px 0;
+  border-bottom:1px solid rgba(74,10,0,0.25);
+  align-items: flex-start;
+}
+
+.relay-meta {
+  color:       var(--ba-gold-mute);
+  display:     flex;
+  gap:         8px;
+  opacity:     0.75;
+  font-family: var(--mono);
+}
+
+/* ── 17. FORM ELEMENTS ── */
+.mech-input, .mech-select {
+  width:       100%;
+  background:  rgba(2,8,4,0.7);
+  border:      1px solid var(--border);
+  color:       var(--text-m);
+  padding:     10px;
+  font-family: var(--mono);
+  font-size:   12px;
+  outline:     none;
+  transition:  all 0.3s ease;
+  margin-top:  5px;
+}
+
+.mech-input:focus, .mech-select:focus {
+  border-color:var(--border-hi);
+  box-shadow:  inset 0 0 10px rgba(74,222,128,0.15);
+}
+
+.mech-select option {
+  background: var(--bg-panel);
+  color:      var(--text-m);
+}
+
+/* Submit / action button: Blood Angels confirm */
+.mech-btn {
+  background:    rgba(120,5,5,0.2);
+  border:        1px solid var(--ba-crimson);
+  color:         #fff;
+  padding:       12px;
+  cursor:        pointer;
+  font-family:   var(--mono);
+  font-weight:   bold;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  width:         100%;
+  transition:    all 0.2s ease;
+  text-shadow:   0 0 8px rgba(204,34,0,0.5);
+  margin-top:    15px;
+}
+
+.mech-btn:hover {
+  background: rgba(204,34,0,0.35);
+  box-shadow: 0 0 16px rgba(204,34,0,0.4);
+  text-shadow:0 0 12px rgba(204,34,0,0.8);
+}
+
+/* ── 18. ACTION BUTTONS (ledger) ── */
+.action-btn {
+  background:  transparent;
+  border:      1px solid var(--ba-border);
+  color:       var(--ba-gold-mute);
+  font-family: var(--mono);
+  font-size:   9px;
+  padding:     2px 6px;
+  cursor:      pointer;
+  margin-left: 4px;
+  transition:  all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(74,10,0,0.3);
+  border-color:var(--ba-gold-dim);
+  color:       var(--ba-gold);
+}
+
+.action-btn.del:hover {
+  background:   rgba(204,34,0,0.2);
+  border-color: var(--ba-crimson);
+  color:        var(--ba-crimson);
+}
+
+.toggle-btn {
+  background:  rgba(4,1,1,0.7);
+  border:      1px solid var(--ba-border);
+  color:       var(--ba-gold-mute);
+  padding:     10px;
+  font-family: var(--mono);
+  font-size:   12px;
+  cursor:      pointer;
+  text-align:  left;
+  display:     flex;
+  justify-content:space-between;
+  transition:  all 0.2s;
+}
+
+.toggle-btn.active {
+  border-color:var(--ba-gold);
+  color:       #fff;
+  box-shadow:  inset 0 0 10px rgba(201,168,76,0.15);
+}
+
+/* ── 19. SCROLLBARS ── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #050000; border-left: 1px solid var(--ba-border); }
+::-webkit-scrollbar-thumb { background: rgba(74,10,0,0.6); border: 1px solid var(--ba-border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ba-crimson); }
+
+/* ── 20. LEGACY PURGE ── */
+.hymn-bg {
+  display:    none !important;
+  visibility: hidden !important;
+  opacity:    0 !important;
+}

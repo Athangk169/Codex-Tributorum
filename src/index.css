@@ -1,0 +1,47 @@
+/* ── MOBILE ADAPTATION PROTOCOL ── */
+@media (max-width: 768px) {
+  /* 1. Remove the rigid 100vh lock to allow scrolling */
+  .system-content-layer {
+    overflow-y: auto !important;
+    padding-bottom: 60px; /* Space for the footer */
+  }
+
+  /* 2. Force all tactical grids to single columns */
+  .grid-2-col, .grid-3-col, .grid-4-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 15px !important;
+  }
+
+  /* 3. Overview Slide Specifics: Stack KPIs 2x2 */
+  .kpi-grid-mobile {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* 4. Shrink the Radar/Holo for mobile */
+  .radar-wrap {
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  /* 5. Adjust Header for narrow screens */
+  .hdr {
+    flex-direction: column;
+    height: auto !important;
+    padding: 5px !important;
+    gap: 2px;
+  }
+  .hdr-center { font-size: 8px !important; }
+
+  /* 6. Nav Buttons: Stack them or make them smaller */
+  .tactical-nav {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+  }
+  .nav-btn {
+    font-size: 9px !important;
+    padding: 8px 2px !important;
+  }
+}

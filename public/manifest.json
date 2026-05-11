@@ -1,0 +1,11 @@
+{
+  "name": "Codex Tributorum",
+  "short_name": "Codex",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#1a5d2c",
+  "icons": [
+    { "src": "/cog.jpeg", "sizes": "512x512", "type": "image/jpeg" }
+  ]
+}

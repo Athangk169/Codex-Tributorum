@@ -1,3 +1,4 @@
+// src/components/slides/mobile/MobileAuspex.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import ScrambleText from '../../shared/ScrambleText';
 
@@ -110,21 +111,27 @@ const InteractiveMechChart = ({ months, series, isDual, yPrefix = '', showAverag
     return `${smooth} L ${xAt(values.length - 1).toFixed(1)},${(PAD.t + cH).toFixed(1)} L ${xAt(0).toFixed(1)},${(PAD.t + cH).toFixed(1)} Z`;
   };
 
-  const formatYAxis = (v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v);
+  const formatYAxis = (v) => {
+    if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+    if (v > 0 && v < 10) return v.toFixed(1);
+    return Math.round(v);
+  };
+  
   const yTicks = [0, chartMax * 0.25, chartMax * 0.5, chartMax * 0.75, chartMax];
 
   const formatXMonth = (m) => {
-    const [year, month] = m.split('-');
+    if (!m) return '';
+    const parts = m.split('-');
+    if (parts.length < 2) return m;
+    const [year, month] = parts;
     const date = new Date(year, parseInt(month) - 1);
-    return date.toLocaleString('en-US', { month: 'short', year: '2-digit' }); // shorter for mobile
+    return date.toLocaleString('en-US', { month: 'short', year: '2-digit' }); 
   };
 
-  // ── TOUCH & MOUSE HANDLER ──
   const handlePointerMove = (e) => {
     if (!svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     
-    // Support both TouchEvents and MouseEvents
     let clientX;
     if (e.touches && e.touches.length > 0) clientX = e.touches[0].clientX;
     else if (e.clientX) clientX = e.clientX;
@@ -153,7 +160,7 @@ const InteractiveMechChart = ({ months, series, isDual, yPrefix = '', showAverag
     series.forEach((s, i) => {
       elements.push(
         <text key={`val-${i}`} x="8" y={currentY} fill={s.color} fontSize="9" fontFamily="var(--mono)">
-          {s.label}: {yPrefix}{s.values[hoverIdx].toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          {s.label}: {yPrefix}{s.values[hoverIdx].toLocaleString('en-IN', { maximumFractionDigits: 0 })}
         </text>
       );
       currentY += 14;
@@ -291,6 +298,7 @@ const MOBILE_AUSPEX_STYLES = `
   .mob-table-wrapper {
     overflow-x: auto; -webkit-overflow-scrolling: touch;
     border: 1px solid var(--border); padding-bottom: 8px;
+    margin: 0 -4px;
   }
   .mob-chart-panel {
     background: rgba(4, 1, 1, 0.85); border: 1px solid #2a0800;
@@ -316,32 +324,36 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
   const [isModalOpen, setIsModalOpen]   = useState(false);
   const [editingHolding, setEditingHolding] = useState(null);
 
-  const expenseTrends = data?.trends || [];
-  const expenseCategories = data?.expenseCategories || [];
+  const expenseTrends = data?.trends ?? [];
+  const expenseCategories = data?.expenseCategories ?? [];
 
+  // MIRRORED EXACTLY FROM DESKTOP
   useEffect(() => {
     const fetchInvestments = async () => {
       if (!dbInvestments) return;
       try {
         const result = await dbInvestments.allDocs({ include_docs: true });
         
-        const snaps  = result.rows
+        const snaps = result.rows
           .map(r => r.doc)
-          .filter(doc => 
-            doc.month && 
-            (doc.type === 'investment_snapshot' || doc._id.startsWith('snapshot')) &&
-            (!userId || userId === 'default' || doc.user_id === userId) 
+          .filter(doc =>
+            doc.month &&
+            doc.type === 'investment_snapshot' &&
+            doc._id.startsWith('snapshot_') &&
+            (!userId || userId === 'default' || doc.user_id === userId)
           )
           .sort((a, b) => a.month.localeCompare(b.month));
-
+        
         setHistory(snaps);
 
-        const hDoc = await dbInvestments.get('current_holdings').catch(() => ({ assets: [] }));
-        
+        const hDoc = await dbInvestments
+          .get('current_holdings')
+          .catch(() => ({ assets: [], user_id: userId }));
+
         if (userId && userId !== 'default' && hDoc.user_id && hDoc.user_id !== userId) {
-          setHoldings([]); 
+          setHoldings([]);
         } else {
-          setHoldings(hDoc.assets || []);
+          setHoldings(hDoc.assets ?? []);
         }
 
         if (selectedYear !== 'ALL' && snaps.length > 0 && !snaps.some(s => s.month.startsWith(selectedYear))) {
@@ -350,28 +362,46 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
       } catch (err) { console.error("◈ AUSPEX_TRACE:", err); }
     };
     fetchInvestments();
-  }, [dbInvestments, data, userId, selectedYear]); 
+  }, [dbInvestments, data, userId]); 
 
+  // MIRRORED EXACTLY FROM DESKTOP
   useEffect(() => {
     if (!dbInvestments || holdings.length === 0) return;
     const autoCommitByDate = async () => {
       const today = new Date();
-      if (today.getDate() < 28) return;
-
-      const monthStr = today.toISOString().substring(0, 7); 
+      const monthStr = today.toISOString().substring(0, 7);
       const docId = `snapshot_${monthStr}`;
-
+      
       try {
         const existing = await dbInvestments.get(docId).catch(() => null);
-        if (existing) return;
+        
+        // Minor fix to allow replacing corrupt 0 values generated by the broken mobile app
+        if (existing && (existing.invested > 0 || existing.current > 0)) return;
 
-        const totalInvested = holdings.reduce((acc, ast) => acc + (ast.avgPrice * ast.shares), 0);
-        const totalCurrent = holdings.reduce((acc, ast) => acc + (ast.ltp * ast.shares), 0);
+        const totalInvested = holdings.reduce((acc, ast) => {
+          const shares = Number(ast.shares) || 0;
+          const avgPrice = Number(ast.avgPrice) || 0;
+          return acc + (avgPrice * shares);
+        }, 0);
+        
+        const totalCurrent = holdings.reduce((acc, ast) => {
+          const shares = Number(ast.shares) || 0;
+          const currentPrice = Number(ast.currentprice ?? ast.price ?? ast.ltp ?? ast.avgPrice) || 0;
+          return acc + (currentPrice * shares);
+        }, 0);
 
-        const doc = { 
-          _id: docId, type: 'investment_snapshot', month: monthStr, 
-          invested: totalInvested, current: totalCurrent, user_id: userId
+        if (totalInvested === 0 && totalCurrent === 0) return; // Prevent overwriting with 0s
+
+        const doc = {
+          _id: docId,
+          _rev: existing?._rev,
+          type: 'investment_snapshot',
+          month: monthStr,
+          invested: totalInvested,
+          current: totalCurrent,
+          user_id: userId,
         };
+        
         await dbInvestments.put(doc);
         
         setHistory(prev => {
@@ -384,14 +414,20 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
     return () => clearTimeout(timeoutId);
   }, [dbInvestments, holdings, userId]);
 
+  // MIRRORED EXACTLY FROM DESKTOP
   const saveHoldingToVault = async (ticker, newShares, newAvgPrice) => {
     if (!dbInvestments) return;
     try {
-      const doc = await dbInvestments.get('current_holdings').catch(() => ({ 
-        _id: 'current_holdings', type: 'investment_manifest', assets: [], user_id: userId 
+      const manifestId = 'current_holdings';
+      const doc = await dbInvestments.get(manifestId).catch(() => ({
+        _id: manifestId,
+        type: 'investment_manifest',
+        assets: [],
+        user_id: userId,
       }));
 
-      if (!doc.user_id && userId && userId !== 'default') doc.user_id = userId;
+      if (!doc.user_id) doc.user_id = userId;
+      if (doc.user_id === 'default' && userId !== 'default') doc.user_id = userId;
 
       const idx = doc.assets.findIndex(a => a.ticker === ticker);
       if (idx >= 0) {
@@ -399,11 +435,14 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
         doc.assets[idx].avgPrice = newAvgPrice;
       } else {
         doc.assets.push({
-          id: `ast_${Date.now()}`, ticker: ticker,
-          shares: newShares, avgPrice: newAvgPrice, ltp: newAvgPrice 
+          id: `ast${Date.now()}`,
+          ticker,
+          shares: newShares,
+          avgPrice: newAvgPrice,
+          currentprice: newAvgPrice,
         });
       }
-
+      
       await dbInvestments.put(doc);
       setHoldings(doc.assets);
       setIsModalOpen(false);
@@ -423,7 +462,7 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
       }
       return trueTotal;
     } else {
-      return Math.abs(t.byCategory[selectedCategory] || 0);
+      return Math.abs(t.byCategory?.[selectedCategory] || 0);
     }
   });
 
@@ -432,8 +471,19 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
   const investedValues = filteredHistory.map(h => h.invested ?? h.current ?? 0);
   const currentValues  = filteredHistory.map(h => h.current ?? 0);
 
-  const totalInvested = holdings.reduce((acc, a) => acc + (a.avgPrice * a.shares), 0);
-  const totalValue    = holdings.reduce((acc, a) => acc + (a.ltp    * a.shares), 0);
+  // MIRRORED EXACTLY FROM DESKTOP
+  const totalInvested = holdings.reduce((acc, a) => {
+    const shares = Number(a.shares) || 0;
+    const avgPrice = Number(a.avgPrice) || 0;
+    return acc + (avgPrice * shares);
+  }, 0);
+  
+  const totalValue = holdings.reduce((acc, a) => {
+    const shares = Number(a.shares) || 0;
+    const currentPrice = Number(a.currentprice ?? a.price ?? a.ltp ?? a.avgPrice) || 0;
+    return acc + (currentPrice * shares);
+  }, 0);
+  
   const totalPL       = totalValue - totalInvested;
   const totalPLPct    = totalInvested > 0 ? ((totalPL / totalInvested) * 100).toFixed(2) : '0.00';
 
@@ -457,16 +507,16 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
           <div className="mob-kpi-row">
             <div>
               <div className="kpi-lbl" style={{ fontSize: '9px' }}>CAPITAL DEPLOYED</div>
-              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalInvested.toLocaleString()} /></div>
+              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div className="kpi-lbl" style={{ fontSize: '9px' }}>MARKET VALUE</div>
-              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalValue.toLocaleString()} /></div>
+              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
             </div>
             <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #2a0800', paddingTop: '8px', marginTop: '4px', textAlign: 'center' }}>
               <div className="kpi-lbl" style={{ fontSize: '9px' }}>NET YIELD</div>
               <div className={`kpi-val ${totalPL >= 0 ? 'ok' : 'warn'}`} style={{ fontSize: '18px' }}>
-                <ScrambleText text={`${totalPL >= 0 ? '+' : ''}₹${Math.abs(totalPL).toLocaleString()} (${totalPLPct}%)`} />
+                <ScrambleText text={`${totalPL >= 0 ? '+' : ''}₹${Math.abs(totalPL).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${totalPLPct}%)`} />
               </div>
             </div>
           </div>
@@ -484,33 +534,40 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
             </div>
             
             <div className="mob-table-wrapper">
-              <table className="investment-table" style={{ width: '100%', minWidth: '400px', borderCollapse: 'collapse' }}>
+              <table className="investment-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['TICKER', 'SHARES', 'AVG', 'CUR. VALUE', 'P/L'].map(h => (
-                      <th key={h} style={{ padding: '10px 8px', textAlign: h === 'CUR. VALUE' || h === 'P/L' ? 'right' : 'left', fontSize: '9px', color: 'var(--text-d)' }}>{h}</th>
+                    {['TICKER', 'UNITS', 'AVG', 'CUR. VALUE', 'P/L'].map(h => (
+                      <th key={h} style={{ padding: '10px 4px', textAlign: h === 'CUR. VALUE' || h === 'P/L' ? 'right' : 'left', fontSize: '9px', color: 'var(--text-d)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {holdings.map((ast, index) => {
-                    const invested = ast.avgPrice * ast.shares;
-                    const value = ast.ltp * ast.shares;
+                    // MIRRORED EXACTLY FROM DESKTOP
+                    const shares = Number(ast.shares) || 0;
+                    const avgPrice = Number(ast.avgPrice) || 0;
+                    const currentPrice = Number(ast.currentprice ?? ast.price ?? ast.ltp ?? ast.avgPrice) || 0;
+                    
+                    const invested = avgPrice * shares;
+                    const value = currentPrice * shares;
                     const pl = value - invested;
+
                     return (
                       <tr key={ast.id} className="assimilate-in" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', animationDelay: `${index * 0.05}s` }}>
-                        <td style={{ padding: '10px 8px' }}>
+                        <td style={{ padding: '8px 4px', maxWidth: '90px' }}>
                           <button className="mech-btn" 
-                            style={{ margin: 0, padding: '4px 6px', fontSize: '10px', color: 'var(--border-hi)', background: 'transparent' }}
+                            style={{ margin: 0, padding: '4px 6px', fontSize: '10px', color: 'var(--border-hi)', background: 'transparent', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}
+                            title={ast.ticker}
                             onClick={() => { setEditingHolding(ast); setIsModalOpen(true); }}>
                             {ast.ticker} ⚙
                           </button>
                         </td>
-                        <td style={{ padding: '10px 8px', color: 'var(--text-d)', fontSize: '11px' }}>{ast.shares}</td>
-                        <td style={{ padding: '10px 8px', color: 'var(--text-d)', fontSize: '11px' }}>₹{ast.avgPrice.toLocaleString()}</td>
-                        <td style={{ padding: '10px 8px', textAlign: 'right', color: 'var(--text-d)', fontSize: '11px' }}>₹{value.toLocaleString()}</td>
-                        <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: '11px' }} className={pl >= 0 ? 'ok' : 'warn'}>
-                          {pl >= 0 ? '+' : ''}₹{pl.toLocaleString()}
+                        <td style={{ padding: '8px 4px', color: 'var(--text-d)', fontSize: '11px' }}>{shares.toLocaleString('en-IN')}</td>
+                        <td style={{ padding: '8px 4px', color: 'var(--text-d)', fontSize: '11px' }}>₹{avgPrice.toLocaleString('en-IN')}</td>
+                        <td style={{ padding: '8px 4px', textAlign: 'right', color: 'var(--text-d)', fontSize: '11px' }}>₹{value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ padding: '8px 4px', textAlign: 'right', fontSize: '11px' }} className={pl >= 0 ? 'ok' : 'warn'}>
+                          {pl >= 0 ? '+' : ''}₹{pl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </td>
                       </tr>
                     );
@@ -550,7 +607,12 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
                     ]}
                   />
                 ) : (
-                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: '10px' }}>[ VAULT IS EMPTY ]</div>
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: '10px', textAlign: 'center', padding: '0 10px' }}>
+                    {history.length === 0
+                      ? '[ VAULT IS EMPTY ]'
+                      : `[ NO SNAPSHOTS FOR ${selectedYear} ]`
+                    }
+                  </div>
                 )}
               </div>
             </div>
@@ -574,7 +636,9 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
                     }]}
                   />
                 ) : (
-                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: '10px' }}>[ NO DATA ]</div>
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: '10px' }}>
+                    [ NO DATA FOR {selectedYear} ]
+                  </div>
                 )}
               </div>
             </div>

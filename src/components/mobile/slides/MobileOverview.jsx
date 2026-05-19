@@ -1,5 +1,5 @@
 // src/components/slides/mobile/MobileOverview.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ScrambleText from '../../shared/ScrambleText';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,6 +224,24 @@ const STYLES = `
   .mo-rv.ok   { color: var(--border-hi, #4ade80); text-shadow: var(--glow); }
   .mo-rv.warn { color: #eab308; text-shadow: 0 0 8px #eab30877; }
 
+  /* ── AR Recovery rows ── */
+  .mo-ar-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 0; border-bottom: 1px dashed rgba(74,10,0,0.35); font-size: 10px;
+  }
+  .mo-ar-tag { color: #b8923e; letter-spacing: 1px; text-transform: uppercase; font-family: var(--mono, monospace); }
+  .mo-ar-amt { color: var(--border-hi, #4ade80); font-weight: bold; font-family: var(--mono, monospace); }
+  .mo-ar-clear {
+    background: transparent; border: 1px solid #2a0800; color: #4a2010;
+    font-family: var(--mono, monospace); font-size: 8px; padding: 3px 7px;
+    cursor: pointer; letter-spacing: 1px; transition: border-color 0.2s, color 0.2s;
+  }
+  .mo-ar-clear:active { border-color: var(--border-hi, #4ade80); color: #fff; }
+
+  /* ── KPI colour variants ── */
+  .mo-val.amber  { color: #eab308; text-shadow: 0 0 8px #eab30877; }
+  .mo-val.red    { color: #cc2200; text-shadow: 0 0 10px #cc220077; }
+
   /* ── Horizontal divider ── */
   .mo-divider {
     width: 100%; height: 1px;
@@ -276,7 +294,7 @@ const formatDateToText = (dateString) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
-export default function MobileOverview({ data, syncLed }) {
+export default function MobileOverview({ data, syncLed, dbTransactions, userId }) {
 
   // ── Data extraction (identical to OverviewSlide) ──
   const txns    = data?.transactions  || [];
@@ -290,8 +308,15 @@ export default function MobileOverview({ data, syncLed }) {
 
   const bank       = buckets.Bank ?? data?.liveBalances?.total ?? 0;
   const cash       = buckets.Cash       || 0;
+  const cardTotal  = buckets.Card       || 0;
   const ar         = buckets.AR         || 0;
   const provisions = buckets.Provisions || 0;
+
+  // Three distinct financial views — matching desktop
+  const liquidReserve  = bank + cash;
+  const netPosition    = liquidReserve - cardTotal;
+  const totalCardLimit = (data?.cards || []).reduce((sum, c) => sum + (c.limit || 0), 0);
+  const creditHeadroom = Math.max(0, totalCardLimit - cardTotal);
 
   // ── Card obligations ──
   const nextBucket = data?.cardObligations?.buckets?.find(b => b.status !== 'paid') || {};
@@ -315,17 +340,54 @@ export default function MobileOverview({ data, syncLed }) {
   if (maxDaysSinceAudit >= 7) { globalAuditState = 'CORRUPTED'; auditColor = '#cc2200'; isGlobalCrit = true; }
   else if (maxDaysSinceAudit >= 4) { globalAuditState = 'RESTLESS'; auditColor = '#eab308'; }
 
-  // ── Category spending ──
   const positiveCats = data?.positiveCategories || [];
   const neutralCats  = data?.neutralCategories  || [];
   const categorySpending = {};
   txns.forEach(tx => {
     const cat = tx.category || 'UNCATEGORIZED';
-    if (!positiveCats.includes(cat) && !neutralCats.includes(cat) && !tx.is_reimbursable) {
+    if (!positiveCats.includes(cat) && !neutralCats.includes(cat) && !tx.reimbursement_tag) {
       categorySpending[cat] = (categorySpending[cat] || 0) + Math.abs(tx.amount);
     }
   });
   const topCategories = Object.entries(categorySpending).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  // ── Recovery manifest — all-time AR from engine (cross-month correct) ──
+  const arByTag = data?.arByTag && Object.keys(data.arByTag).length > 0
+    ? data.arByTag
+    : (() => {
+        const local = {};
+        txns.forEach(tx => {
+          const tag = tx.reimbursement_tag;
+          if (!tag) return;
+          if (tx.category === 'Reimbursement Received') {
+            local[tag] = Math.max(0, (local[tag] || 0) - Math.abs(tx.amount));
+            if (local[tag] === 0) delete local[tag];
+          } else {
+            local[tag] = (local[tag] || 0) + Math.abs(tx.amount);
+          }
+        });
+        return local;
+      })();
+  const openAR = Object.entries(arByTag).filter(([,a]) => a > 0).sort((a,b) => b[1]-a[1]);
+
+  // ── Clear AR — log Reimbursement Received (matching desktop) ──
+  const handleClearAR = useCallback(async (tag, amt) => {
+    if (!dbTransactions || !userId) return;
+    const suffix  = Math.random().toString(36).substring(2, 10);
+    const today   = new Date().toISOString().split('T')[0];
+    const defAcct = data?.accounts?.find(a => a.is_default && a.parent === 'Bank')?._id?.split(':').pop() || 'bank_hdfc';
+    await dbTransactions.put({
+      _id:               `txn:${userId}:${today}:${suffix}`,
+      type:              'transaction', user_id: userId,
+      date:              today,
+      description:       `Reimbursement from ${tag}`,
+      amount:            Math.round(amt),
+      category:          'Reimbursement Received',
+      account_type:      'Bank', sub_account: defAcct,
+      reimbursement_tag: tag, notes: null,
+      created_at:        new Date().toISOString(),
+    });
+  }, [dbTransactions, userId, data]);
 
   // ── Stream data ──
   const recentTxns = txns.slice(0, 15);
@@ -360,7 +422,7 @@ export default function MobileOverview({ data, syncLed }) {
           </div>
         </div>
 
-        {/* ── 2. KPI 2×2 GRID ── */}
+        {/* ── 2. KPI 2×3 GRID ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>GROSS TITHE</div>
@@ -377,6 +439,20 @@ export default function MobileOverview({ data, syncLed }) {
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>CASH RESERVE</div>
             <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={cash.toLocaleString()} speed={80} step={0.067} /></div>
+          </div>
+          <div className="mo-panel">
+            <div className="mo-ttl" style={{ fontSize: '8px' }}>NET POSITION</div>
+            <div className={`mo-val ${netPosition >= 0 ? 'ok' : 'red'}`} style={{ fontSize: '18px' }}>
+              ₹ <ScrambleText text={netPosition.toLocaleString()} speed={80} step={0.067} />
+            </div>
+            <div style={{ fontSize: '8px', color: '#4a2010', marginTop: '4px', letterSpacing: '1px' }}>LIQUID − DEBT</div>
+          </div>
+          <div className="mo-panel">
+            <div className="mo-ttl" style={{ fontSize: '8px', color: '#eab308' }}>CREDIT HEADROOM</div>
+            <div className="mo-val amber" style={{ fontSize: '18px' }}>
+              ₹ <ScrambleText text={creditHeadroom.toLocaleString()} speed={80} step={0.067} />
+            </div>
+            <div style={{ fontSize: '8px', color: '#4a2010', marginTop: '4px', letterSpacing: '1px' }}>LIMIT − UTILISED</div>
           </div>
         </div>
 
@@ -431,7 +507,33 @@ export default function MobileOverview({ data, syncLed }) {
           </div>
         </div>
 
-        {/* ── 5. REIMBURSEMENTS & PROVISIONS ── */}
+        {/* ── 5. RECOVERY MANIFEST ── */}
+        {openAR.length > 0 && (
+          <div className="mo-panel">
+            <div className="mo-ttl">RECOVERY MANIFEST</div>
+            {openAR.slice(0, 4).map(([tag, amt]) => (
+              <div key={tag} className="mo-ar-row">
+                <span className="mo-ar-tag">{tag}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span className="mo-ar-amt">₹ {Math.round(amt).toLocaleString()}</span>
+                  {dbTransactions && (
+                    <button className="mo-ar-clear" onClick={() => handleClearAR(tag, amt)}>
+                      CLEAR
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #2a0800', fontSize: '9px' }}>
+              <span style={{ color: '#b8923e', letterSpacing: '1px' }}>TOTAL OUTSTANDING</span>
+              <span style={{ color: 'var(--border-hi, #4ade80)', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
+                ₹ {Math.round(openAR.reduce((s,[,a]) => s+a, 0)).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── 6. REIMBURSEMENTS & PROVISIONS ── */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>REIMBURSE</div>
@@ -443,7 +545,7 @@ export default function MobileOverview({ data, syncLed }) {
           </div>
         </div>
 
-        {/* ── 6. EXPENDITURE VECTORS ── */}
+        {/* ── 7. EXPENDITURE VECTORS ── */}
         <div className="mo-panel">
           <div className="mo-ttl">EXPENDITURE VECTORS</div>
           {topCategories.length > 0 ? (
@@ -469,7 +571,7 @@ export default function MobileOverview({ data, syncLed }) {
           )}
         </div>
 
-        {/* ── 7. ADJUSTED LEDGER ── */}
+        {/* ── 8. ADJUSTED LEDGER ── */}
         <div className="mo-panel mo-cornered">
           <div className="mo-ttl">ADJUSTED LEDGER</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -484,7 +586,7 @@ export default function MobileOverview({ data, syncLed }) {
           </div>
         </div>
 
-        {/* ── 8. NOOSPHERE RELAY ── */}
+        {/* ── 9. NOOSPHERE RELAY ── */}
         <div className="mo-panel" style={{ height: '220px', display: 'flex', flexDirection: 'column' }}>
           <div className="mo-ttl">
             <span>NOOSPHERE RELAY</span>

@@ -1,11 +1,12 @@
+// src/components/slides/MobileLiquidity.jsx
 import React, { useState, useEffect } from 'react';
-import { CardEngine } from '../../../utils/engine';
+import { CardEngine, AccountEngine } from '../../../utils/engine';
 import ScrambleText from '../../shared/ScrambleText';
 
 const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
   const cards = data?.cards || [];
 
-  // ── STATE (mirrors desktop) ──
+  // ── STATE ──
   const [activeCardId, setActiveCardId] = useState('');
   const [localBuckets, setLocalBuckets] = useState([]);
   const [localCardInfo, setLocalCardInfo] = useState({});
@@ -16,7 +17,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
   useEffect(() => {
     if (!activeCardId && cards.length > 0) {
       const defCard = cards.find(c => c.is_default) || cards[0];
-      setActiveCardId(defCard.id);
+      setActiveCardId(defCard._id);
     }
   }, [cards, activeCardId]);
 
@@ -35,8 +36,8 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
     fetchBuckets();
   }, [activeCardId, data, dbTransactions, dbMetadata, userId]);
 
-  // ── CARD MANAGEMENT STATE ──
-  const initialForm = { id: '', name: '', billing_day: 15, due_day: 5, due_month_offset: 1, limit: 100000, is_default: false };
+  // ── CARD MANAGEMENT STATE (V2 SCHEMA) ──
+  const initialForm = { _docId: '', name: '', billing_day: 15, due_day: 5, due_month_offset: 1, limit: 100000, is_default: false };
   const [form, setForm] = useState(initialForm);
 
   const handleInputChange = (e) => {
@@ -46,37 +47,38 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const handleSaveCard = async (e) => {
     e.preventDefault();
-    if (!dbMetadata) return;
+    if (!dbMetadata || !userId) return;
     try {
-      let doc;
-      try { doc = await dbMetadata.get('config_cards'); }
-      catch (err) { doc = { _id: 'config_cards', type: 'system_config', cards: [] }; }
-      let updatedCards = [...doc.cards];
-      if (form.is_default) updatedCards = updatedCards.map(c => ({ ...c, is_default: false }));
-      if (form.id) {
-        const idx = updatedCards.findIndex(c => c.id === form.id);
-        if (idx >= 0) updatedCards[idx] = { ...form };
+      if (form._docId) {
+        const doc = await dbMetadata.get(form._docId);
+        if (form.is_default && !doc.is_default) {
+          const existing = await AccountEngine.getCards(dbMetadata, userId);
+          for (const card of existing) {
+            if (card._id !== form._docId && card.is_default)
+              await dbMetadata.put({ ...card, is_default: false });
+          }
+        }
+        await dbMetadata.put({
+          ...doc,
+          name: form.name, billing_day: form.billing_day,
+          due_day: form.due_day, due_month_offset: form.due_month_offset,
+          limit: form.limit, is_default: form.is_default,
+          updated: new Date().toISOString(),
+        });
       } else {
-        updatedCards.push({ ...form, id: `card_${Date.now()}` });
+        await AccountEngine.addCard(form, dbMetadata, userId);
       }
-      if (updatedCards.length === 1) updatedCards[0].is_default = true;
-      doc.cards = updatedCards;
-      await dbMetadata.put(doc);
       setForm(initialForm);
-    } catch (err) { console.error('Failed to save card config', err); }
+    } catch (err) { console.error('Failed to save card config:', err); }
   };
 
-  const handleDeleteCard = async (id) => {
-    if (!dbMetadata) return;
-    try {
-      const doc = await dbMetadata.get('config_cards');
-      doc.cards = doc.cards.filter(c => c.id !== id);
-      if (doc.cards.length > 0 && !doc.cards.find(c => c.is_default)) doc.cards[0].is_default = true;
-      await dbMetadata.put(doc);
-    } catch (err) { console.error('Purge failed:', err); }
+  const handleDeleteCard = async (cardDocId) => {
+    if (!dbMetadata || !userId) return;
+    try { await AccountEngine.deleteCard(cardDocId, dbMetadata, userId); }
+    catch (err) { console.error('Purge failed:', err); }
   };
 
-  // ── FORMATTERS (identical to desktop) ──
+  // ── FORMATTERS ──
   const formatTemporalDate = (dateString) => {
     if (!dateString) return 'NO DEBT DETECTED';
     const date = new Date(dateString);
@@ -88,7 +90,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
     return `${day + (suffix[(v - 20) % 10] || suffix[v] || suffix[0])} ${month}`;
   };
 
-  // ── METRICS (identical to desktop) ──
+  // ── METRICS ──
   const nextBucket = localBuckets.find(b => b.status !== 'paid') || {};
   const today = new Date();
   const dueDate = nextBucket.due_date ? new Date(nextBucket.due_date) : null;
@@ -100,7 +102,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
   const limitPct = localCardInfo.limit ? Math.min(100, (totalPendingDebt / localCardInfo.limit) * 100) : 0;
   const isLimitCritical = limitPct >= 80;
 
-  const activeCard = cards.find(c => c.id === activeCardId);
+  const activeCard = cards.find(c => c._id === activeCardId);
 
   return (
     <div className="slide-container active" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', gap: '10px', padding: '10px' }}>
@@ -185,9 +187,9 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
               <div className="card-dropdown">
                 {cards.length > 0 ? cards.map(c => (
                   <div
-                    key={c.id}
-                    className={`card-dropdown-item ${c.id === activeCardId ? 'active-card' : ''}`}
-                    onClick={() => { setActiveCardId(c.id); setShowCardSelect(false); }}
+                    key={c._id}
+                    className={`card-dropdown-item ${c._id === activeCardId ? 'active-card' : ''}`}
+                    onClick={() => { setActiveCardId(c._id); setShowCardSelect(false); }}
                   >
                     {c.name} {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '9px' }}>[PRI]</span>}
                     <span style={{ float: 'right', color: 'var(--text-d)' }}>₹{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'}</span>
@@ -207,7 +209,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
 
           {/* Add / Edit Form */}
           <div className="panel mech-panel" style={{ padding: '14px' }}>
-            <div className="sec-ttl" style={{ fontSize: '10px' }}>{form.id ? 'RECALIBRATE LINE' : 'REGISTER NEW LINE'}</div>
+            <div className="sec-ttl" style={{ fontSize: '10px' }}>{form._docId ? 'RECALIBRATE LINE' : 'REGISTER NEW LINE'}</div>
             <form onSubmit={handleSaveCard} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
 
               <div>
@@ -244,9 +246,9 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
 
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button type="submit" className="mech-btn" style={{ flex: 1, marginTop: 0, fontSize: '10px', padding: '8px' }}>
-                  {form.id ? '[ UPDATE ]' : '[ REGISTER ]'}
+                  {form._docId ? '[ UPDATE ]' : '[ REGISTER ]'}
                 </button>
-                {form.id && (
+                {form._docId && (
                   <button type="button" className="mech-btn" style={{ marginTop: 0, fontSize: '10px', padding: '8px 12px', background: 'rgba(200,34,0,0.15)', borderColor: 'var(--ba-crimson)', color: 'var(--ba-crimson)' }}
                     onClick={() => setForm(initialForm)}>
                     CANCEL
@@ -261,7 +263,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
             <div className="sec-ttl" style={{ fontSize: '10px' }}>REGISTERED LINES</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {cards.length > 0 ? cards.map((c, i) => (
-                <div key={c.id} className="assimilate-in" style={{ animationDelay: `${i * 0.05}s`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', border: '1px solid var(--ba-border-lo)', background: 'rgba(0,0,0,0.3)' }}>
+                <div key={c._id} className="assimilate-in" style={{ animationDelay: `${i * 0.05}s`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', border: '1px solid var(--ba-border-lo)', background: 'rgba(0,0,0,0.3)' }}>
                   <div>
                     <span style={{ color: '#fff', fontSize: '11px' }}>{c.name}</span>
                     {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '9px', marginLeft: '6px' }}>[PRI]</span>}
@@ -270,8 +272,8 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <button className="action-btn" style={{ fontSize: '9px' }} onClick={() => setForm(c)}>EDIT</button>
-                    <button className="action-btn del" style={{ fontSize: '9px' }} onClick={() => handleDeleteCard(c.id)}>DEL</button>
+                    <button className="action-btn" style={{ fontSize: '9px' }} onClick={() => setForm({ _docId: c._id, name: c.name, billing_day: c.billing_day, due_day: c.due_day, due_month_offset: c.due_month_offset, limit: c.limit || 0, is_default: !!c.is_default })}>EDIT</button>
+                    <button className="action-btn del" style={{ fontSize: '9px' }} onClick={() => handleDeleteCard(c._id)}>DEL</button>
                   </div>
                 </div>
               )) : (

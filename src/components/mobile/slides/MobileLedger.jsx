@@ -1,6 +1,6 @@
 // src/components/slides/MobileLedger.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { CategorizationEngine } from '../../../utils/engine';
+import { CategorizationEngine, AREngine } from '../../../utils/engine';
 
 // ── Cryptographic Placeholder ──
 const CryptoPlaceholder = ({ text, active }) => {
@@ -57,7 +57,6 @@ const TouchServoSkull = ({ x, y, status }) => {
     };
   }, []);
 
-  // Camera per status
   useEffect(() => {
     if (!mvRef.current) return;
     mvRef.current.style.transition = 'filter 0.5s ease';
@@ -80,7 +79,6 @@ const TouchServoSkull = ({ x, y, status }) => {
     }
   }, [status]);
 
-  // Touch tracking (idle only)
   useEffect(() => {
     const handleTouchMove = (e) => {
       if (status !== 'idle' || trackingCooldownRef.current) { setTouchOffset({ x: 0, y: 0 }); return; }
@@ -150,46 +148,45 @@ const MOBILELEDGER_STYLES = `
   .laser-sweep { animation: laserSweep 2s ease-in-out forwards; }
   @keyframes dataAssimilate { 0% { opacity: 0; transform: translateY(-8px) scale(0.98); filter: brightness(2); } 100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); } }
   @keyframes targetLockPulse { 0% { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 20px rgba(204,34,0,0.5); border-color: var(--ba-crimson); } 50% { box-shadow: inset 0 0 0 1px var(--ba-gold), inset 0 0 30px rgba(201,168,76,0.4); border-color: var(--ba-gold); } 100% { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 20px rgba(204,34,0,0.5); border-color: var(--ba-crimson); } }
+  @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  .reimb-tag-row { animation: fadeSlideIn 0.25s ease forwards; }
 `;
 
 // ── Main Component ──
 export default function MobileLedger({ data, dbTransactions, dbMetadata, user }) {
   const [activeTab, setActiveTab] = useState('entry');
 
-  const transactions = data?.transactions ?? [];
-  const accounts     = data?.accounts ?? [];
-  const cards        = data?.cards ?? [];
-
-  // FIX: split all three category arrays separately
+  const transactions       = data?.transactions       ?? [];
+  const accounts           = data?.accounts           ?? [];
+  const cards              = data?.cards              ?? [];
   const expenseCategories  = data?.expenseCategories  ?? [];
   const positiveCategories = data?.positiveCategories ?? [];
   const neutralCategories  = data?.neutralCategories  ?? [];
+  
+  const existingTags = AREngine.getAllTags(transactions);
 
-  const [formData, setFormData] = useState({
+  const blankForm = {
     date: new Date().toISOString().split('T')[0],
-    description: '',
-    amount: '',
-    method: 'Bank',
+    description: '', amount: '', method: '',
     category: 'Uncategorized',
-    isReimbursable: false,
-  });
+    isReimbursable: false, reimbursementTag: '', notes: '',
+  };
 
-  const [isEditing, setIsEditing]       = useState(null);
-  const [lastAddedId, setLastAddedId]   = useState(null);
+  const [formData, setFormData]           = useState(blankForm);
+  const [isEditing, setIsEditing]         = useState(null);
+  const [lastAddedId, setLastAddedId]     = useState(null);
   const [isDescFocused, setIsDescFocused] = useState(false);
   const [isAmtFocused, setIsAmtFocused]   = useState(false);
 
-  // FIX: When accounts load in, seed `method` to the first real account name.
-  // Without this, the select's controlled value stays as the literal string
-  // 'Bank' (which matches no option), so the browser shows the first account
-  // visually but React still submits sub_account: 'Bank' on a fresh form.
+  // Seed default method
   useEffect(() => {
-    if (formData.method === 'Bank' && accounts.length > 0) {
-      setFormData(prev => ({ ...prev, method: accounts[0].name }));
+    if (!formData.method && accounts.length > 0) {
+      const firstSubId = accounts[0]._id?.split(':').pop() || '';
+      setFormData(prev => ({ ...prev, method: firstSubId }));
     }
   }, [accounts]);
 
-  // Skull viewport-relative positioning
+  // Skull positioning logic
   const getIdleDock = () => ({ x: window.innerWidth - 62, y: 10 });
   const [skullState, setSkullState] = useState({ ...getIdleDock(), status: 'idle' });
 
@@ -222,7 +219,11 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
   // ── Handlers ──
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [name]: value };
+      if (name === 'category' && value === 'Reimbursement Received') next.isReimbursable = true;
+      return next;
+    });
   };
 
   const handleFocus = (e, type) => {
@@ -243,8 +244,39 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
     if (!desc || !dbMetadata || !user) return;
     const suggested = await CategorizationEngine.autoTag(desc, dbMetadata, user);
     if (suggested !== 'Uncategorized') {
-      setFormData(prev => ({ ...prev, category: suggested }));
+      setFormData(prev => ({
+        ...prev,
+        category: suggested,
+        isReimbursable: suggested === 'Reimbursement Received' ? true : prev.isReimbursable,
+      }));
     }
+  };
+
+  // Resolve V2 Sub Account Type
+  const resolveAccountType = (subId) => {
+    if (!subId || subId === 'cash_main') return 'Cash';
+    if (cards.find(c => c._id?.split(':').pop() === subId)) return 'Card';
+    return 'Bank';
+  };
+
+  const resolveMethodLabel = (subId) => {
+    if (!subId) return 'UNKNOWN';
+    if (subId === 'cash_main') return 'CASH';
+    const card = cards.find(c => c._id?.split(':').pop() === subId);
+    if (card) return card.name.toUpperCase();
+    const acc = accounts.find(a => a._id?.split(':').pop() === subId);
+    if (acc) return acc.name.toUpperCase();
+    const accByName = accounts.find(a => a.name === subId);
+    if (accByName) return accByName.name.toUpperCase();
+    const cardByName = cards.find(c => c.name === subId);
+    if (cardByName) return cardByName.name.toUpperCase();
+    return subId.toUpperCase();
+  };
+
+  const getTransactionType = (category) => {
+    if (positiveCategories.includes(category)) return 'income';
+    if (neutralCategories.includes(category))  return 'neutral';
+    return 'expense';
   };
 
   const handleInscribe = async (e) => {
@@ -255,61 +287,68 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
       return;
     }
 
-    let actType = 'Bank';
-    if (formData.method === 'Cash') actType = 'Cash';
-    else if (cards.find(c => c.name === formData.method || c.id === formData.method)) actType = 'Card';
+    const subId     = formData.method || accounts[0]?._id?.split(':').pop() || 'bank_hdfc';
+    const actType   = resolveAccountType(subId);
+    const rawAmt    = Number(formData.amount);
+    const isIncome  = positiveCategories.includes(formData.category);
+    const signedAmt = isIncome ? Math.abs(rawAmt) : -Math.abs(rawAmt);
+    const suffix    = Math.random().toString(36).substring(2, 10);
+    const txnId     = isEditing || `txn:${user}:${formData.date}:${suffix}`;
 
-    const newTitheId = isEditing || (formData.date + 'T' + new Date().toISOString().split('T')[1] + 'Z');
-
-    // FIX: sign the amount based on whether the category is income (+) or expense (-)
-    const rawAmt = Number(formData.amount);
-    const isIncomeCategory = positiveCategories.includes(formData.category);
-    const signedAmount = isIncomeCategory ? Math.abs(rawAmt) : -Math.abs(rawAmt);
-
-    const newTithe = {
-      _id: newTitheId,
-      type: 'transaction',
-      user_id: user || 'Athang',
-      date: formData.date,
-      amount: signedAmount,
-      description: formData.description,
-      category: formData.category,
-      account_type: actType,
-      sub_account: formData.method,
-      is_reimbursable: formData.isReimbursable,
+    const newTxn = {
+      _id:               txnId,
+      type:              'transaction',
+      user_id:           user || 'Athang',
+      date:              formData.date,
+      amount:            signedAmt,
+      description:       formData.description,
+      category:          formData.category,
+      account_type:      actType,
+      sub_account:       subId,
+      reimbursement_tag: formData.isReimbursable ? (formData.reimbursementTag.trim() || 'untagged') : null,
+      notes:             formData.notes.trim() || null,
+      created_at:        new Date().toISOString(),
     };
 
     if (dbTransactions) {
       if (isEditing) {
         try {
           const existing = await dbTransactions.get(isEditing);
-          await dbTransactions.put({ ...existing, ...newTithe });
+          await dbTransactions.put({ ...existing, ...newTxn });
         } catch (err) { console.error('Update failed:', err); }
       } else {
-        await dbTransactions.put(newTithe);
+        await dbTransactions.put(newTxn);
       }
     }
 
-    setLastAddedId(newTitheId);
-    setFormData({
-      description: '',
-      amount: '',
-      date: formData.date,
-      method: formData.method,
-      category: 'Uncategorized',
-      isReimbursable: false,
-    });
+    setLastAddedId(txnId);
+    setFormData(prev => ({ ...blankForm, date: prev.date, method: prev.method }));
     setIsEditing(null);
   };
 
   const handleEdit = (tx) => {
+    const subId = (() => {
+      const raw = tx.sub_account;
+      if (!raw) return formData.method;
+      if (raw === 'cash_main') return raw;
+      if (accounts.find(a => a._id?.split(':').pop() === raw)) return raw;
+      if (cards.find(c => c._id?.split(':').pop() === raw)) return raw;
+      const acc = accounts.find(a => a.name === raw);
+      if (acc) return acc._id?.split(':').pop() || raw;
+      const card = cards.find(c => c.name === raw);
+      if (card) return card._id?.split(':').pop() || raw;
+      return formData.method;
+    })();
+
     setFormData({
-      date: tx.date || tx._id.split('T')[0],
-      description: tx.description || '',
-      amount: Math.abs(tx.amount || 0).toString(),
-      method: tx.sub_account || tx.account_type || 'Bank',
-      category: tx.category || 'Uncategorized',
-      isReimbursable: tx.is_reimbursable || false,
+      date:             tx.date || tx._id.split('T')[0],
+      description:      tx.description || '',
+      amount:           Math.abs(tx.amount || 0).toString(),
+      method:           subId,
+      category:         tx.category || 'Uncategorized',
+      isReimbursable:   !!(tx.reimbursement_tag || tx.is_reimbursable),
+      reimbursementTag: (tx.reimbursement_tag && tx.reimbursement_tag !== 'untagged') ? tx.reimbursement_tag : '',
+      notes:            tx.notes || '',
     });
     setIsEditing(tx._id);
     setActiveTab('entry');
@@ -327,31 +366,8 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
 
   const handleAbortEdit = () => {
     setIsEditing(null);
-    setFormData({
-      description: '',
-      amount: '',
-      date: new Date().toISOString().split('T')[0],
-      // FIX: reset to first real account, not bare 'Bank' sentinel
-      method: accounts[0]?.name ?? 'Bank',
-      category: 'Uncategorized',
-      isReimbursable: false,
-    });
+    setFormData(prev => ({ ...blankForm, date: prev.date, method: accounts[0]?._id?.split(':').pop() || 'Bank' }));
     aimSkull(null);
-  };
-
-  const resolveMethodName = (tx) => {
-    const rawId = tx.sub_account || tx.account_type;
-    const cardMatch = cards.find(c => c.id === rawId || c.name === rawId);
-    if (cardMatch) return cardMatch.name;
-    const accMatch = accounts.find(a => a.id === rawId || a.name === rawId);
-    if (accMatch) return accMatch.name;
-    return rawId || 'BANK';
-  };
-
-  const getTransactionType = (category) => {
-    if (positiveCategories.includes(category)) return 'income';
-    if (neutralCategories.includes(category))  return 'neutral';
-    return 'expense';
   };
 
   // ── Render ──
@@ -375,12 +391,10 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
       {/* ENTRY FORM */}
       {activeTab === 'entry' && (
         <form onSubmit={handleInscribe} className="mob-form-wrapper">
-          {/* Mode label */}
           <div style={{ fontSize: 11, letterSpacing: 2, color: isEditing ? 'var(--amber, #eab308)' : 'var(--text-d)', borderLeft: `2px solid ${isEditing ? 'var(--amber, #eab308)' : 'var(--ba-border-lo)'}`, paddingLeft: 8 }}>
             {isEditing ? 'RECALIBRATE TITHE · EDIT ENTRY' : 'INSCRIBE TITHE · LOG ENTRY'}
           </div>
 
-          {/* Description */}
           <div className="mob-input-group">
             <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>IDENTIFIER · DESCRIPTION</label>
             <input
@@ -395,7 +409,6 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
             <CryptoPlaceholder text="AWAITING DESIGNATION..." active={!formData.description && !isDescFocused} />
           </div>
 
-          {/* Amount */}
           <div className="mob-input-group">
             <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>QUANTITY</label>
             <input
@@ -410,7 +423,6 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
             <CryptoPlaceholder text="0.00" active={!formData.amount && !isAmtFocused} />
           </div>
 
-          {/* Date + Method */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div className="mob-input-group">
               <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>TEMPORAL STAMP</label>
@@ -435,19 +447,24 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
                 onBlur={() => aimSkull(null)}
               >
                 <optgroup label="BANK ACCOUNTS">
-                  {accounts.map(acc => <option key={acc.id} value={acc.name}>{acc.name}</option>)}
+                  {accounts.map(acc => {
+                    const subId = acc._id?.split(':').pop() || acc._id;
+                    return <option key={acc._id} value={subId}>{acc.name}</option>;
+                  })}
                 </optgroup>
-                <optgroup label="CREDIT CARDS">
-                  {cards.map(card => <option key={card.id} value={card.name}>{card.name}</option>)}
+                <optgroup label="CREDIT LINES">
+                  {cards.map(card => {
+                    const subId = card._id?.split(':').pop() || card._id;
+                    return <option key={card._id} value={subId}>{card.name}</option>;
+                  })}
                 </optgroup>
                 <optgroup label="PHYSICAL RESERVE">
-                  <option value="Cash">CASH RESERVE</option>
+                  <option value="cash_main">CASH RESERVE</option>
                 </optgroup>
               </select>
             </div>
           </div>
 
-          {/* FIX: Category — now shows all three category groups */}
           <div className="mob-input-group">
             <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>CLASSIFICATION</label>
             <select
@@ -459,34 +476,21 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
               onBlur={() => aimSkull(null)}
             >
               <option value="Uncategorized">-- AWAITING CLASSIFICATION --</option>
-
-              {/* INCOME categories (positiveCategories) */}
               {positiveCategories.length > 0 && (
                 <optgroup label="── TITHE INCOME ──">
-                  {positiveCategories
-                    .filter(cat => cat && cat !== 'Uncategorized')
-                    .sort()
-                    .map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  {positiveCategories.filter(cat => cat && cat !== 'Uncategorized').sort().map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </optgroup>
               )}
-
-              {/* TRANSFER / NEUTRAL categories */}
               {neutralCategories.length > 0 && (
                 <optgroup label="── TRANSFERS ──">
-                  {neutralCategories
-                    .filter(cat => cat && cat !== 'Uncategorized')
-                    .sort()
-                    .map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  {neutralCategories.filter(cat => cat && cat !== 'Uncategorized').sort().map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </optgroup>
               )}
-
-              {/* EXPENSE categories */}
               {expenseCategories.length > 0 && (
                 <optgroup label="── EXPENDITURES ──">
                   {Array.from(new Set([...expenseCategories, formData.category]))
                     .filter(cat => cat && cat !== 'Uncategorized' && !positiveCategories.includes(cat) && !neutralCategories.includes(cat))
-                    .sort()
-                    .map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    .sort().map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </optgroup>
               )}
             </select>
@@ -494,7 +498,7 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
 
           {/* Recovery directive toggle */}
           <div className="mob-input-group" style={{ flexDirection: 'row', gap: 8 }}>
-            <button type="button" onClick={() => setFormData({ ...formData, isReimbursable: false })}
+            <button type="button" onClick={() => setFormData({ ...formData, isReimbursable: false, reimbursementTag: '' })}
               style={{ flex: 1, padding: '12px 4px', fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer', background: !formData.isReimbursable ? 'rgba(204,34,0,0.15)' : 'rgba(0,0,0,0.5)', color: !formData.isReimbursable ? '#fff' : '#8c732c', border: '1px solid', borderColor: !formData.isReimbursable ? '#cc2200' : 'var(--border)', boxShadow: !formData.isReimbursable ? 'inset 0 0 10px rgba(204,34,0,0.2)' : 'none', transition: 'all 0.2s', letterSpacing: 1 }}>
               PERSONAL
             </button>
@@ -504,7 +508,40 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
             </button>
           </div>
 
-          {/* Abort edit */}
+          {/* New Tag Input */}
+          {formData.isReimbursable && (
+            <div className="mob-input-group reimb-tag-row">
+              <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>RECOVERY TARGET // WHO OWES YOU</label>
+              <input
+                type="text" name="reimbursementTag" value={formData.reimbursementTag}
+                onChange={handleInputChange}
+                placeholder="e.g. Rahul, Work Expense..."
+                className="mech-input"
+                list="mob-ar-tags-datalist"
+                style={{ padding: 10, background: 'rgba(0,0,0,0.5)', color: '#fff', fontFamily: 'var(--mono)' }}
+                onFocus={e => aimSkull(e.target, 10, 0, 'focus')}
+                onBlur={() => aimSkull(null)}
+              />
+              <datalist id="mob-ar-tags-datalist">
+                {existingTags.map(tag => <option key={tag} value={tag} />)}
+              </datalist>
+            </div>
+          )}
+
+          {/* New Notes Input */}
+          <div className="mob-input-group">
+            <label className="kpi-lbl" style={{ fontSize: 9, color: '#b8923e' }}>FIELD NOTES // OPTIONAL</label>
+            <input
+              type="text" name="notes" value={formData.notes}
+              onChange={handleInputChange}
+              placeholder="Additional context..."
+              className="mech-input"
+              style={{ padding: 10, background: 'rgba(0,0,0,0.5)', color: '#fff', fontFamily: 'var(--mono)' }}
+              onFocus={e => aimSkull(e.target, 10, 0, 'focus')}
+              onBlur={() => aimSkull(null)}
+            />
+          </div>
+
           {isEditing && (
             <button type="button" onClick={handleAbortEdit}
               style={{ padding: 10, background: 'transparent', border: '1px solid var(--ba-border-lo)', color: 'var(--text-d)', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: 2, cursor: 'pointer' }}>
@@ -512,7 +549,6 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
             </button>
           )}
 
-          {/* Submit */}
           <button type="submit"
             style={{ padding: 14, background: 'transparent', border: `1px solid ${isEditing ? 'var(--amber, #eab308)' : 'var(--border-hi)'}`, color: isEditing ? 'var(--amber, #eab308)' : 'var(--border-hi)', fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: 2, cursor: 'pointer' }}
             onTouchStart={e => aimSkull(e.currentTarget, 10, -10, 'idle')}
@@ -544,26 +580,28 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
                   className={`mob-tx-card${isTargetLocked ? ' target-locked' : ''}${isNew ? ' assimilate-in' : ''}`}
                   style={{ animationDelay: isNew ? animDelay : '0s' }}
                 >
-                  {/* Row 1: date · method */}
                   <div className="mob-tx-row-1">
                     <span style={{ fontFamily: 'var(--mono)' }}>{tx.date}</span>
-                    <span style={{ color: '#8c732c' }}>{resolveMethodName(tx)}</span>
+                    <span style={{ color: '#8c732c' }}>{resolveMethodLabel(tx.sub_account)}</span>
                   </div>
 
-                  {/* Row 2: description · amount */}
                   <div className="mob-tx-row-2">
                     <span className="mob-tx-desc">
                       {tx.description || 'UNKNOWN'}
-                      {tx.is_reimbursable && <span style={{ color: 'var(--border-hi)', marginLeft: 6, fontSize: 10 }}>⟳R</span>}
+                      {tx.reimbursement_tag && (
+                        <span style={{ color: 'var(--border-hi)', marginLeft: 6, fontSize: 10 }}>[R: {tx.reimbursement_tag}]</span>
+                      )}
                     </span>
                     <span className="mob-tx-amt" style={{ color: amountColor, textShadow: txType === 'income' ? 'var(--glow)' : 'none' }}>
                       {txType === 'income' ? '+' : ''}{Math.abs(tx.amount).toLocaleString()}
                     </span>
                   </div>
 
-                  {/* Row 3: category · actions */}
                   <div className="mob-tx-row-3">
-                    <span className="mob-tx-cat">{tx.category || 'UNCATEGORIZED'}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span className="mob-tx-cat">{tx.category || 'UNCATEGORIZED'}</span>
+                      {tx.notes && <span style={{ fontSize: '8px', color: 'var(--ba-gold-mute)' }}>// {tx.notes}</span>}
+                    </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className={`mob-action-btn${isEditing === tx._id ? ' edit-active' : ''}`} onClick={() => handleEdit(tx)}>EDIT</button>
                       <button className="mob-action-btn del" onClick={() => handleDelete(tx._id)}>DEL</button>

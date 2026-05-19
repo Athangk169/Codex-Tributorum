@@ -94,7 +94,7 @@ const StatusBar = ({ statusMsg, rulesCount }) => (
 
 const HoloSlide = ({ data, db, userId }) => {
   const [rules, setRules] = useState([]);
-  const [categoryConfig, setCategoryConfig] = useState({ positive_categories: [], neutral_categories: [], expense_categories: [] });
+  const [categoryConfig, setCategoryConfig] = useState({ income_categories: [], neutral_categories: [], expense_categories: [] });
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [newKeyword, setNewKeyword] = useState('');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -106,18 +106,23 @@ const HoloSlide = ({ data, db, userId }) => {
   // ── MULTI-SYSTEM FEED STATE ──
   const [activeHolo, setActiveHolo] = useState('baal');
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false); // ◈ NEW: Tactical Loading State
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
+  // ◈ V2 ENGINE COMPLIANT DATA LOAD ◈
   const loadRules = useCallback(async () => {
     if (!db || !userId) return;
 
     try {
-      const allDocs = await db.allDocs({ include_docs: true });
+      const allDocs = await db.allDocs({ 
+        include_docs: true,
+        startkey: `finance:rule:${userId}:`,
+        endkey:   `finance:rule:${userId}:\uffff`
+      });
 
       const uniqueRules = {};
       allDocs.rows
         .map(row => row.doc)
-        .filter(d => d.type === 'category_rule' && d.user_id === userId)
+        .filter(d => d.type === 'finance:rule' && d.user_id === userId && d.is_active)
         .forEach(rule => {
           uniqueRules[rule.category_name] = rule;
         });
@@ -127,20 +132,19 @@ const HoloSlide = ({ data, db, userId }) => {
       );
       setRules(r);
 
+      // Fetch v2 configuration
       let config;
       try {
-        config = await db.get(`config_category_types_${userId}`);
+        config = await db.get(`finance:config:categories:${userId}`);
       } catch {
-        try {
-          config = await db.get('config_category_types');
-        } catch {
-          config = { 
-            _id: 'config_category_types', 
-            positive_categories: [], 
-            neutral_categories: [], 
-            expense_categories: [] 
-          };
-        }
+        config = { 
+          _id: `finance:config:categories:${userId}`, 
+          type: 'finance:config',
+          user_id: userId,
+          income_categories: [], 
+          neutral_categories: [], 
+          expense_categories: [] 
+        };
       }
       setCategoryConfig(config);
 
@@ -159,33 +163,29 @@ const HoloSlide = ({ data, db, userId }) => {
   };
 
   const getCatType = (name) => {
-    if (categoryConfig.positive_categories?.includes(name)) return 'income';
+    if (categoryConfig.income_categories?.includes(name)) return 'income';
     if (categoryConfig.neutral_categories?.includes(name)) return 'neutral';
     return 'expense';
   };
 
   const handleUpdateType = async (categoryName, newType) => {
     try {
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
       try {
         conf = await db.get(confId);
       } catch {
         conf = {
-          _id: confId,
-          type: 'system_config',
-          user_id: userId,
-          positive_categories: [],
-          neutral_categories: [],
-          expense_categories: []
+          _id: confId, type: 'finance:config', user_id: userId,
+          income_categories: [], neutral_categories: [], expense_categories: []
         };
       }
 
-      conf.positive_categories = (conf.positive_categories || []).filter(c => c !== categoryName);
+      conf.income_categories = (conf.income_categories || []).filter(c => c !== categoryName);
       conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== categoryName);
       conf.expense_categories = (conf.expense_categories || []).filter(c => c !== categoryName);
 
-      if (newType === 'income') conf.positive_categories.push(categoryName);
+      if (newType === 'income') conf.income_categories.push(categoryName);
       else if (newType === 'neutral') conf.neutral_categories.push(categoryName);
       else conf.expense_categories.push(categoryName);
 
@@ -204,7 +204,7 @@ const HoloSlide = ({ data, db, userId }) => {
     const kw = newKeyword.trim().toLowerCase();
     if (rule.keywords.includes(kw)) { flash('// KEYWORD ALREADY EXISTS', true); return; }
     try {
-      await db.put({ ...rule, keywords: [...rule.keywords, kw] });
+      await db.put({ ...rule, keywords: [...rule.keywords, kw], updated: new Date().toISOString() });
       setNewKeyword('');
       flash(`// KEYWORD UPLINKED >> ${kw.toUpperCase()}`);
       loadRules();
@@ -215,7 +215,7 @@ const HoloSlide = ({ data, db, userId }) => {
     const rule = rules.find(r => r._id === ruleId);
     if (!rule) return;
     try {
-      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw) });
+      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw), updated: new Date().toISOString() });
       flash(`// KEYWORD PURGED >> ${kw.toUpperCase()}`);
       loadRules();
     } catch { flash('// WRITE ERROR', true); }
@@ -226,7 +226,7 @@ const HoloSlide = ({ data, db, userId }) => {
     if (!name || !userId) return;
 
     const slug = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const id = `rule_${slug}`;
+    const id = `finance:rule:${userId}:${slug}`;
 
     if (rules.find(r => r._id === id || r.category_name.toLowerCase() === name.toLowerCase())) {
       flash('// CATEGORY ALREADY EXISTS', true);
@@ -236,29 +236,21 @@ const HoloSlide = ({ data, db, userId }) => {
     try {
       await db.put({
         _id: id,
-        type: 'category_rule',
+        type: 'finance:rule',
         user_id: userId,
         category_name: name,
         keywords: [],
-        is_active: true
+        is_active: true,
+        created: new Date().toISOString(),
+        updated: new Date().toISOString()
       });
 
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
-      try {
-        conf = await db.get(confId);
-      } catch {
-        conf = {
-          _id: confId,
-          type: 'system_config',
-          user_id: userId,
-          positive_categories: [],
-          neutral_categories: [],
-          expense_categories: []
-        };
-      }
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      if (newCategoryType === 'income') conf.positive_categories.push(name);
+      if (newCategoryType === 'income') conf.income_categories.push(name);
       else if (newCategoryType === 'neutral') conf.neutral_categories.push(name);
       else conf.expense_categories.push(name);
 
@@ -279,15 +271,12 @@ const HoloSlide = ({ data, db, userId }) => {
     try {
       await db.remove(rule);
 
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
-      try {
-        conf = await db.get(confId);
-      } catch {
-        conf = { _id: confId, positive_categories: [], neutral_categories: [], expense_categories: [] };
-      }
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      conf.positive_categories = (conf.positive_categories || []).filter(c => c !== rule.category_name);
+      conf.income_categories = (conf.income_categories || []).filter(c => c !== rule.category_name);
       conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== rule.category_name);
       conf.expense_categories = (conf.expense_categories || []).filter(c => c !== rule.category_name);
 
@@ -312,24 +301,14 @@ const HoloSlide = ({ data, db, userId }) => {
     const oldName = rule.category_name;
 
     try {
-      await db.put({ ...rule, category_name: newName });
+      await db.put({ ...rule, category_name: newName, updated: new Date().toISOString() });
 
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
-      try {
-        conf = await db.get(confId);
-      } catch {
-        conf = {
-          _id: confId,
-          type: 'system_config',
-          user_id: userId,
-          positive_categories: [],
-          neutral_categories: [],
-          expense_categories: []
-        };
-      }
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      conf.positive_categories = (conf.positive_categories || []).map(c => c === oldName ? newName : c);
+      conf.income_categories = (conf.income_categories || []).map(c => c === oldName ? newName : c);
       conf.neutral_categories = (conf.neutral_categories || []).map(c => c === oldName ? newName : c);
       conf.expense_categories = (conf.expense_categories || []).map(c => c === oldName ? newName : c);
 
@@ -344,12 +323,9 @@ const HoloSlide = ({ data, db, userId }) => {
     }
   };
 
-  // ◈ NEW: TACTICAL EXPANSION LOGIC ◈
   const handleExpandToggle = () => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    
-    // Simulate cogitator recalibration delay before snapping the UI
     setTimeout(() => {
       setIsExpanded(prev => !prev);
       setIsTransitioning(false);
@@ -386,11 +362,9 @@ const HoloSlide = ({ data, db, userId }) => {
   };
 
   return (
-    <div className="slide-container active" style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '20px', height: '100%' }}>
+    <div className="slide-container active" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '15px' }}>
       
-      {/* ── Slide Specific Styles & Animations ── */}
       <style>{`
-        /* Target Lock Pulse */
         @keyframes targetLockPulse {
           0%   { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 15px rgba(204,34,0,0.3); background: rgba(204,34,0,0.1); }
           50%  { box-shadow: inset 0 0 0 1px var(--ba-gold), inset 0 0 25px rgba(201,168,76,0.25); background: rgba(201,168,76,0.1); }
@@ -402,7 +376,6 @@ const HoloSlide = ({ data, db, userId }) => {
           border-color: transparent !important;
         }
 
-        /* ◈ NEW: Button Loading Pulse ◈ */
         @keyframes overridePulse {
           0%   { opacity: 0.7; background: rgba(204, 34, 0, 0.2); box-shadow: inset 0 0 5px rgba(204, 34, 0, 0.1); }
           50%  { opacity: 1.0; background: rgba(204, 34, 0, 0.6); box-shadow: inset 0 0 15px rgba(204, 34, 0, 0.8), 0 0 10px rgba(204, 34, 0, 0.5); }
@@ -416,7 +389,6 @@ const HoloSlide = ({ data, db, userId }) => {
           border-color: var(--ba-crimson) !important;
         }
 
-        /* Tactical Hover & Assimilation */
         .manifest-row {
           transition: background 0.2s ease, box-shadow 0.2s ease;
           position: relative;
@@ -443,11 +415,20 @@ const HoloSlide = ({ data, db, userId }) => {
           opacity: 0;
         }
 
-        /* Active Field Illumination */
         .mech-input { border-left: 2px solid var(--border); }
         .mech-input:focus {
           border-left: 3px solid var(--ba-crimson) !important;
           border-color: var(--border-hi) !important;
+        }
+
+        /* Viewport Edge Fading */
+        .holo-viewport::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          box-shadow: inset 0 0 60px 20px rgba(0,0,0,0.9), inset 0 0 10px rgba(204,34,0,0.3);
+          z-index: 5;
         }
       `}</style>
 
@@ -456,95 +437,35 @@ const HoloSlide = ({ data, db, userId }) => {
         <div 
           style={{
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)',
+            background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(8px)',
             zIndex: 9998
           }}
           onClick={() => { if (!isTransitioning) handleExpandToggle(); }}
         />
       )}
 
-      {/* ── LEFT COLUMN ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%', minHeight: 0 }}>
-        
-        <div 
-          className="panel mech-panel" 
-          style={{ 
-            padding: '15px', display: 'flex', flexDirection: 'column', 
-            transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
-            ...(isExpanded ? {
-              // Maximized Override Styling
-              position: 'fixed', top: '30px', left: '30px', right: '30px', bottom: '30px',
-              zIndex: 9999, height: 'auto',
-              boxShadow: '0 0 60px rgba(204, 34, 0, 0.5)',
-              borderColor: 'var(--ba-crimson)'
-            } : {
-              // Standard Grid Styling
-              height: '340px', flexShrink: 0 
-            })
-          }}
-        >
-          {/* Header & Maximize Button */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div className="sec-ttl" style={{ padding: '0', margin: 0, fontSize: '10px', color: isExpanded ? 'var(--ba-crimson)' : 'inherit', transition: 'color 0.3s' }}>
-              MULTI-SYSTEM ORBITAL RECON {isExpanded ? '// MAXIMIZED UPLINK ACTIVE' : ''}
-            </div>
-            
-            <button 
-              className={`mech-btn ${isTransitioning ? 'btn-loading' : ''}`} 
-              style={{ 
-                margin: 0, padding: '4px 10px', fontSize: '9px', width: 'auto',
-                background: isExpanded ? 'rgba(204, 34, 0, 0.15)' : 'transparent',
-                color: isExpanded ? '#fff' : 'var(--text-d)',
-                borderColor: isExpanded ? 'var(--ba-crimson)' : 'var(--ba-border-lo)',
-                transition: 'all 0.2s'
-              }} 
-              onClick={handleExpandToggle}
-            >
-              {isTransitioning 
-                ? (isExpanded ? '[ REVERTING... ]' : '[ OVERRIDING... ]') 
-                : (isExpanded ? '[ COLLAPSE ]' : '[ MAXIMIZE ]')}
-            </button>
-          </div>
-          
-          {/* Orbital Feed Toggle */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexShrink: 0 }}>
-            <button 
-              className="mech-btn" 
-              style={{ flex: 1, margin: 0, padding: '8px', fontSize: '10px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.15)' : 'rgba(2,8,4,0.7)', color: activeHolo === 'baal' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--ba-border-lo)' }} 
-              onClick={() => setActiveHolo('baal')}
-            >
-              [ BAAL PRIME ]
-            </button>
-            <button 
-              className="mech-btn" 
-              style={{ flex: 1, margin: 0, padding: '8px', fontSize: '10px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.15)' : 'rgba(2,8,4,0.7)', color: activeHolo === 'terra' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--ba-border-lo)' }} 
-              onClick={() => setActiveHolo('terra')}
-            >
-              [ HOLY TERRA ]
-            </button>
-          </div>
-
-          <div style={{ flex: 1, position: 'relative', border: '1px solid var(--ba-border-lo)', background: '#000' }}>
-            <iframe 
-              title="Orbital Holo Survey" 
-              src={activeHolo === 'baal' ? "Baal_holo.html" : "Terra_holo.html"} 
-              style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }} 
-            />
-            <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10 }} />
-          </div>
+      {/* ── TOP BAR ── */}
+      <div className="panel mech-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 15px', flexShrink: 0 }}>
+        <div className="sec-ttl" style={{ margin: 0, border: 'none', color: 'var(--ba-crimson)' }}>
+          COGITATOR // ORBITAL RECON & CLASSIFICATION
         </div>
+        <StatusBar statusMsg={statusMsg} rulesCount={rules.length} />
+      </div>
 
-        <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: '250px' }}>
+      {/* ── 3-COLUMN TACTICAL BRIDGE LAYOUT ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) 2fr minmax(280px, 1.2fr)', gap: '15px', flex: 1, minHeight: 0 }}>
+        
+        {/* ── COLUMN 1: CATEGORY INDEX (LEFT) ── */}
+        <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div className="sec-ttl" style={{ padding: '12px 15px', marginBottom: 0, fontSize: '10px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>CATEGORY INDEX</span>
-            <span style={{ color: 'var(--text-m)' }}><ScrambleText text={rules.length} /> TOTAL</span>
+            <span>CATEGORY TARGETS</span>
+            <span style={{ color: 'var(--text-m)' }}><ScrambleText text={rules.length} /> FILES</span>
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '10px 15px' }}>
             {rules.map((rule, index) => {
               const isSelected = selectedRuleId === rule._id;
               const type = getCatType(rule.category_name);
-              
               const typeColor = type === 'income' ? 'var(--border-hi)' : type === 'neutral' ? 'var(--ba-gold)' : 'var(--ba-crimson)';
               const animDelay = `${Math.min(index * 0.05, 0.4)}s`;
 
@@ -564,18 +485,18 @@ const HoloSlide = ({ data, db, userId }) => {
                   {editingRule?._id === rule._id ? (
                     <div style={{ display: 'flex', gap: '6px', flex: 1 }} onClick={e => e.stopPropagation()}>
                       <input className="mech-input" value={editName} onChange={e => setEditName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(e); if (e.key === 'Escape') setEditingRule(null); }} autoFocus style={{ marginTop: 0 }} />
+                        onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(e); if (e.key === 'Escape') setEditingRule(null); }} autoFocus style={{ marginTop: 0, width: '100%' }} />
                       <button className="action-btn" onClick={handleRenameSubmit}>✓</button>
                       <button className="action-btn" onClick={() => setEditingRule(null)}>✕</button>
                     </div>
                   ) : (
                     <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, overflow: 'hidden' }}>
                         <span style={{ color: typeColor, fontSize: '8px' }}>■</span>
-                        <span style={{ fontSize: '11px', color: isSelected ? '#fff' : 'var(--text-m)' }}>
+                        <span style={{ fontSize: '11px', color: isSelected ? '#fff' : 'var(--text-m)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {isSelected ? '▶ ' : ''}{rule.category_name.toUpperCase()}
-                          <span style={{ color: 'var(--text-d)', fontSize: '10px', marginLeft: '8px', opacity: 0.6 }}>[{rule.keywords.length}]</span>
                         </span>
+                        <span style={{ color: 'var(--text-d)', fontSize: '9px', opacity: 0.6 }}>[{rule.keywords.length}]</span>
                       </div>
                       <div style={{ flexShrink: 0, opacity: isSelected ? 1 : 0.4 }}>
                         <button className="action-btn" onClick={(e) => { e.stopPropagation(); setEditingRule(rule); setEditName(rule.category_name); }}>EDIT</button>
@@ -589,97 +510,168 @@ const HoloSlide = ({ data, db, userId }) => {
           </div>
 
           <div style={{ padding: '10px 15px', borderTop: '1px dashed var(--ba-border-lo)', background: 'rgba(0,0,0,0.4)' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input className="mech-input" placeholder="NEW CATEGORY..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategory()} style={{ marginTop: 0 }} />
-              <select className="mech-select" value={newCategoryType} onChange={e => setNewCategoryType(e.target.value)} style={{ width: '100px', marginTop: 0 }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input className="mech-input" placeholder="NEW TARGET..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategory()} style={{ marginTop: 0, flex: 1, minWidth: '120px' }} />
+              <select className="mech-select" value={newCategoryType} onChange={e => setNewCategoryType(e.target.value)} style={{ width: '85px', marginTop: 0, fontSize: '9px' }}>
                 <option value="expense">EXPENSE</option>
                 <option value="income">INCOME</option>
                 <option value="neutral">NEUTRAL</option>
               </select>
-              <button className="action-btn" onClick={handleAddCategory} style={{ padding: '6px 12px' }}>+ ADD</button>
+              <button className="action-btn" onClick={handleAddCategory} style={{ padding: '6px 10px' }}>+ ADD</button>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ── RIGHT COLUMN ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minHeight: 0 }}>
-        
-        <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: '0 0 50%', minHeight: 0 }}>
-          <div className="sec-ttl" style={{ padding: '12px 15px', marginBottom: 0, fontSize: '10px', color: '#fff' }}>
-            TARGET LOCK // {selectedRule ? selectedRule.category_name.toUpperCase() : 'NONE'}
+        {/* ── COLUMN 2: HOLOGRAM VIEWPORT (CENTER) ── */}
+        <div 
+          className="panel mech-panel holo-viewport" 
+          style={{ 
+            padding: '2px', display: 'flex', flexDirection: 'column', 
+            position: isExpanded ? 'fixed' : 'relative',
+            ...(isExpanded ? {
+              top: '30px', left: '30px', right: '30px', bottom: '30px',
+              zIndex: 9999, height: 'auto',
+              boxShadow: '0 0 60px rgba(204, 34, 0, 0.5)',
+              borderColor: 'var(--ba-crimson)',
+              background: '#000'
+            } : {
+              height: '100%', border: '1px solid var(--ba-border)' 
+            })
+          }}
+        >
+          {/* Tactical Crosshairs */}
+          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40px', height: '40px', borderRadius: '50%', border: '1px solid rgba(204,34,0,0.15)', pointerEvents: 'none', zIndex: 10 }}>
+            <div style={{ position: 'absolute', top: '-10px', left: '19px', width: '2px', height: '10px', background: 'rgba(204,34,0,0.4)' }} />
+            <div style={{ position: 'absolute', bottom: '-10px', left: '19px', width: '2px', height: '10px', background: 'rgba(204,34,0,0.4)' }} />
+            <div style={{ position: 'absolute', left: '-10px', top: '19px', height: '2px', width: '10px', background: 'rgba(204,34,0,0.4)' }} />
+            <div style={{ position: 'absolute', right: '-10px', top: '19px', height: '2px', width: '10px', background: 'rgba(204,34,0,0.4)' }} />
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }}>
-            {!selectedRule ? (
-              <div style={{ color: 'var(--text-d)', fontSize: '11px', textAlign: 'center', marginTop: '20px', fontStyle: 'italic' }}>// AWAITING TARGET SELECTION</div>
-            ) : (
-              <div key={selectedRule._id} className="assimilate-in" style={{ opacity: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px dashed rgba(204, 34, 0, 0.3)' }}>
-                  <span style={{ fontSize: '10px', color: 'var(--text-d)' }}>CLASSIFICATION TYPE</span>
-                  <select className="mech-select" value={getCatType(selectedRule.category_name)} onChange={(e) => handleUpdateType(selectedRule.category_name, e.target.value)} style={{ width: '120px', marginTop: 0 }}>
-                    <option value="expense">EXPENSE</option>
-                    <option value="income">INCOME</option>
-                    <option value="neutral">NEUTRAL</option>
-                  </select>
-                </div>
+          <div style={{ position: 'absolute', top: '15px', left: '15px', zIndex: 11, display: 'flex', gap: '6px' }}>
+            <button 
+              className="mech-btn" 
+              style={{ margin: 0, padding: '4px 10px', fontSize: '9px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'baal' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--border)' }} 
+              onClick={() => setActiveHolo('baal')}
+            >
+              [ BAAL PRIME ]
+            </button>
+            <button 
+              className="mech-btn" 
+              style={{ margin: 0, padding: '4px 10px', fontSize: '9px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'terra' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--border)' }} 
+              onClick={() => setActiveHolo('terra')}
+            >
+              [ HOLY TERRA ]
+            </button>
+          </div>
 
-                <div style={sectionLabel}>ASSIGNED KEYWORDS [{selectedRule.keywords.length}]</div>
-                {selectedRule.keywords.length === 0 ? (
-                  <div style={{ color: 'var(--ba-gold-mute)', fontSize: '10px', marginBottom: '15px' }}>// NO KEYWORDS DETECTED</div>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '20px' }}>
-                    {selectedRule.keywords.map(kw => <KeywordTag key={kw} kw={kw} onDelete={() => handleDeleteKeyword(selectedRuleId, kw)} />)}
+          <div style={{ position: 'absolute', top: '15px', right: '15px', zIndex: 11 }}>
+            <button 
+              className={`mech-btn ${isTransitioning ? 'btn-loading' : ''}`} 
+              style={{ 
+                margin: 0, padding: '4px 10px', fontSize: '9px', width: 'auto',
+                background: isExpanded ? 'rgba(204, 34, 0, 0.3)' : 'rgba(0,0,0,0.8)',
+                color: isExpanded ? '#fff' : 'var(--text-d)',
+                borderColor: isExpanded ? 'var(--ba-crimson)' : 'var(--border)',
+              }} 
+              onClick={handleExpandToggle}
+            >
+              {isTransitioning 
+                ? (isExpanded ? '[ REVERTING... ]' : '[ OVERRIDING... ]') 
+                : (isExpanded ? '[ COLLAPSE VIEW ]' : '[ MAXIMIZE LENS ]')}
+            </button>
+          </div>
+
+          <div style={{ flex: 1, position: 'relative', background: '#000', overflow: 'hidden' }}>
+            <iframe 
+              title="Orbital Holo Survey" 
+              src={activeHolo === 'baal' ? "Baal_holo.html" : "Terra_holo.html"} 
+              style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }} 
+            />
+            <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }} />
+          </div>
+        </div>
+
+        {/* ── COLUMN 3: TARGET LOCK & MATRIX (RIGHT) ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', minHeight: 0 }}>
+          
+          {/* Target Lock */}
+          <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: '0 0 55%', minHeight: 0 }}>
+            <div className="sec-ttl" style={{ padding: '12px 15px', marginBottom: 0, fontSize: '10px', color: '#fff' }}>
+              TARGET LOCK // {selectedRule ? selectedRule.category_name.toUpperCase() : 'NONE'}
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '15px' }}>
+              {!selectedRule ? (
+                <div style={{ color: 'var(--text-d)', fontSize: '11px', textAlign: 'center', marginTop: '40px', fontStyle: 'italic' }}>// AWAITING TARGET SELECTION</div>
+              ) : (
+                <div key={selectedRule._id} className="assimilate-in" style={{ opacity: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px dashed rgba(204, 34, 0, 0.3)' }}>
+                    <span style={{ fontSize: '10px', color: 'var(--text-d)' }}>CLASSIFICATION</span>
+                    <select className="mech-select" value={getCatType(selectedRule.category_name)} onChange={(e) => handleUpdateType(selectedRule.category_name, e.target.value)} style={{ width: '100px', marginTop: 0, padding: '4px' }}>
+                      <option value="expense">EXPENSE</option>
+                      <option value="income">INCOME</option>
+                      <option value="neutral">NEUTRAL</option>
+                    </select>
                   </div>
-                )}
+
+                  <div style={sectionLabel}>UPLINKED KEYWORDS [{selectedRule.keywords.length}]</div>
+                  {selectedRule.keywords.length === 0 ? (
+                    <div style={{ color: 'var(--ba-gold-mute)', fontSize: '10px', marginBottom: '15px' }}>// NO KEYWORDS DETECTED</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '20px' }}>
+                      {selectedRule.keywords.map(kw => <KeywordTag key={kw} kw={kw} onDelete={() => handleDeleteKeyword(selectedRuleId, kw)} />)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {selectedRule && (
+              <div style={{ padding: '10px 15px', borderTop: '1px dashed var(--ba-border-lo)', background: 'rgba(0,0,0,0.4)' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input className="mech-input" placeholder="NEW KEYWORD..." value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddKeyword()} style={{ marginTop: 0 }} />
+                  <button style={inlineBtn} onClick={handleAddKeyword}>UPLINK</button>
+                </div>
               </div>
             )}
           </div>
 
-          {selectedRule && (
-            <div style={{ padding: '10px 15px', borderTop: '1px dashed var(--ba-border-lo)', background: 'rgba(0,0,0,0.4)' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <input className="mech-input" placeholder="NEW KEYWORD..." value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddKeyword()} style={{ marginTop: 0 }} />
-                <button style={inlineBtn} onClick={handleAddKeyword}>UPLINK</button>
+          {/* Matrix Overview */}
+          <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div className="sec-ttl" style={{ padding: '12px 15px', marginBottom: 0, fontSize: '10px' }}>GLOBAL MATRIX</div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              
+              <div>
+                <div style={{ fontSize: '9px', color: 'var(--border-hi)', borderBottom: '1px dashed var(--border-hi)', paddingBottom: '4px', marginBottom: '8px' }}>
+                  INCOME STREAMS // <ScrambleText text={incomes.length} />
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {incomes.length === 0 ? <span style={{ color: 'var(--text-d)', fontSize: '9px' }}>// NONE</span> : incomes.map(r => <span key={r._id} style={{ fontSize: '8px', background: 'rgba(74,222,128,0.05)', padding: '3px 5px', border: '1px solid rgba(74,222,128,0.3)', color: 'var(--border-hi)' }}>{r.category_name}</span>)}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+              
+              <div>
+                <div style={{ fontSize: '9px', color: 'var(--ba-gold)', borderBottom: '1px dashed var(--ba-gold)', paddingBottom: '4px', marginBottom: '8px' }}>
+                  NEUTRAL TRANSFERS // <ScrambleText text={neutrals.length} />
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {neutrals.length === 0 ? <span style={{ color: 'var(--ba-gold-mute)', fontSize: '9px' }}>// NONE</span> : neutrals.map(r => <span key={r._id} style={{ fontSize: '8px', background: 'rgba(201,168,76,0.05)', padding: '3px 5px', border: '1px solid rgba(201,168,76,0.3)', color: 'var(--ba-gold)' }}>{r.category_name}</span>)}
+                </div>
+              </div>
+              
+              <div>
+                <div style={{ fontSize: '9px', color: 'var(--ba-crimson)', borderBottom: '1px dashed var(--ba-crimson)', paddingBottom: '4px', marginBottom: '8px' }}>
+                  EXPENSE OUTFLOWS // <ScrambleText text={expenses.length} />
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {expenses.length === 0 ? <span style={{ color: 'var(--text-d)', fontSize: '9px' }}>// NONE</span> : expenses.map(r => <span key={r._id} style={{ fontSize: '8px', background: 'rgba(204,34,0,0.05)', padding: '3px 5px', border: '1px solid rgba(204,34,0,0.3)', color: 'var(--ba-crimson)' }}>{r.category_name}</span>)}
+                </div>
+              </div>
 
-        <div className="panel mech-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-          <div className="sec-ttl" style={{ padding: '12px 15px', marginBottom: 0, fontSize: '10px' }}>CLASSIFICATION MATRIX</div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            
-            <div>
-              <div style={{ fontSize: '10px', color: 'var(--border-hi)', borderBottom: '1px dashed var(--border-hi)', paddingBottom: '4px', marginBottom: '8px' }}>
-                INCOME STREAMS // <ScrambleText text={incomes.length} />
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {incomes.length === 0 ? <span style={{ color: 'var(--text-d)', fontSize: '9px' }}>// NONE</span> : incomes.map(r => <span key={r._id} style={{ fontSize: '9px', background: 'rgba(74,222,128,0.05)', padding: '4px 6px', border: '1px solid rgba(74,222,128,0.3)', color: 'var(--border-hi)' }}>{r.category_name}</span>)}
-              </div>
             </div>
-            
-            <div>
-              <div style={{ fontSize: '10px', color: 'var(--ba-gold)', borderBottom: '1px dashed var(--ba-gold)', paddingBottom: '4px', marginBottom: '8px' }}>
-                NEUTRAL TRANSFERS // <ScrambleText text={neutrals.length} />
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {neutrals.length === 0 ? <span style={{ color: 'var(--ba-gold-mute)', fontSize: '9px' }}>// NONE</span> : neutrals.map(r => <span key={r._id} style={{ fontSize: '9px', background: 'rgba(201,168,76,0.05)', padding: '4px 6px', border: '1px solid rgba(201,168,76,0.3)', color: 'var(--ba-gold)' }}>{r.category_name}</span>)}
-              </div>
-            </div>
-            
-            <div>
-              <div style={{ fontSize: '10px', color: 'var(--ba-crimson)', borderBottom: '1px dashed var(--ba-crimson)', paddingBottom: '4px', marginBottom: '8px' }}>
-                EXPENSE OUTFLOWS // <ScrambleText text={expenses.length} />
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {expenses.length === 0 ? <span style={{ color: 'var(--text-d)', fontSize: '9px' }}>// NONE</span> : expenses.map(r => <span key={r._id} style={{ fontSize: '9px', background: 'rgba(204,34,0,0.05)', padding: '4px 6px', border: '1px solid rgba(204,34,0,0.3)', color: 'var(--ba-crimson)' }}>{r.category_name}</span>)}
-              </div>
-            </div>
-
           </div>
-          <StatusBar statusMsg={statusMsg} rulesCount={rules.length} />
         </div>
+
       </div>
     </div>
   );

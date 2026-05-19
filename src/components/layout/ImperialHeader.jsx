@@ -148,7 +148,7 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
     tickerItems.push({ type: 'lore', text: LORE_STRINGS[i % LORE_STRINGS.length] });
   });
 
-  const ledClass = { idle: 'led-ba-idle', ok: 'led-ba-ok', warn: 'led-ba-warn', red: 'led-ba-red' }[syncLed] || 'led-ba-idle';
+  const ledClass = { idle: 'led-ba-idle', ok: 'led-ba-ok', warn: 'led-ba-warn', offline: 'led-ba-warn', error: 'led-ba-red', red: 'led-ba-red' }[syncLed] || 'led-ba-idle';
 
   return (
     <>

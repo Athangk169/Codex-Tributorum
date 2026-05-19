@@ -3,12 +3,12 @@
 
 :root {
   /* ── Mechanicum (data / operational) ── */
-  --bg:         #010200;          /* near-black, very slight red undertone */
-  --bg-panel:   rgba(4, 1, 1, 0.9);
-  --border:     #1a5d2c;          /* Mechanicum green border */
-  --border-hi:  #4ade80;          /* bright green — positive values, ok states */
-  --text-m:     #a7f3d0;          /* bright main text */
-  --text-d:     #6ee7b7;          /* muted green text */
+  --bg:         #010200;
+  --bg-panel:   rgba(6, 2, 2, 0.92);       /* unified — was split between slides */
+  --border:     #1a5d2c;
+  --border-hi:  #4ade80;
+  --text-m:     #a7f3d0;
+  --text-d:     #6ee7b7;
   --glow:       0 0 10px rgba(74, 222, 128, 0.45);
 
   /* ── Blood Angels (structure / chrome) ── */
@@ -17,12 +17,32 @@
   --ba-gold:      #c9a84c;
   --ba-gold-dim:  #b8923e;
   --ba-gold-mute: #7a4a20;
-  --ba-border:    #4a0a00;        /* dark crimson border for panels */
-  --ba-border-lo: #2a0800;        /* very dark crimson separator */
-  --ba-bg-panel:  rgba(8, 1, 1, 0.88);
+  --ba-border:    #4a0a00;
+  --ba-border-lo: #2a0800;
+  --ba-bg-panel:  rgba(6, 2, 2, 0.92);     /* matches --bg-panel for consistency */
+
+  /* ── Panel brightness scale ──
+     All panels now use these vars.
+     --panel-lo  : darkest — background fill
+     --panel-mid : standard panel
+     --panel-hi  : elevated / active panel
+  */
+  --panel-lo:  rgba(4, 1, 1, 0.95);
+  --panel-mid: rgba(8, 2, 2, 0.90);
+  --panel-hi:  rgba(14, 4, 4, 0.88);
+
+  /* ── Three-state sync LED ── */
+  --led-ok:      #4ade80;   /* uplink established, data flowing */
+  --led-offline: #eab308;   /* no sync, local cache intact — expected offline state */
+  --led-error:   #cc2200;   /* genuine failure */
+
+  /* ── Asset paths ── */
+  --texture-carbon:  url('/carbon.png');
+  --texture-metal:   url('/metal.png');
+  --texture-parchment: url('/parchment.jpg');
 
   /* ── Shared status ── */
-  --red:   #cc2200;               /* now BA crimson, not pink */
+  --red:   #cc2200;
   --amber: #eab308;
   --mono:  'Share Tech Mono', monospace;
 }
@@ -39,14 +59,16 @@ html, body {
   overflow: hidden;
 }
 
-/* Carbon fibre texture */
+/* Carbon fibre texture — local asset preferred, CDN fallback */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 1;
-  background-image: url("https://www.transparenttextures.com/patterns/carbon-fibre.png");
-  opacity: 0.04;
+  background-image:
+    var(--texture-carbon),
+    url("https://www.transparenttextures.com/patterns/carbon-fibre.png");
+  opacity: 0.06;
   pointer-events: none;
 }
 
@@ -73,7 +95,6 @@ body::before {
 }
 
 /* ── 5. TICKER & FOOTER SHELL ── */
-/* Height / flex handled by components; these just ensure solid bg */
 .ticker-wrap {
   height: 35px;
   background: #050000;
@@ -107,6 +128,12 @@ body::before {
   align-items: center;
   padding: 0 24px;
   flex-shrink: 0;
+
+  /* Metal plate texture on header */
+  background-image:
+    linear-gradient(90deg, #0e0000, #160000, #0e0000),
+    var(--texture-metal);
+  background-blend-mode: multiply;
 }
 
 .tactical-nav {
@@ -118,7 +145,7 @@ body::before {
   flex-shrink: 0;
 }
 
-/* Nav buttons — base state (Mechanicum) */
+/* Nav buttons — base state */
 .nav-btn {
   flex: 1;
   border: none;
@@ -156,7 +183,7 @@ body::before {
 
 /* ── 8. PANELS ── */
 .panel {
-  background: var(--ba-bg-panel);
+  background: var(--panel-mid);
   border: 1px solid var(--ba-border);
   padding: 15px;
   position: relative;
@@ -172,19 +199,92 @@ body::before {
   background: linear-gradient(90deg, transparent, #c9a84c55, #c9a84c88, #c9a84c55, transparent);
 }
 
-/* mech-panel: same as panel but keeps the Mechanicum inner border */
+/* mech-panel */
 .mech-panel {
-  background: linear-gradient(180deg, rgba(8,2,2,0.95) 0%, rgba(4,1,1,0.92) 100%);
+  background: linear-gradient(180deg, var(--panel-mid) 0%, var(--panel-lo) 100%);
   border: 1px solid var(--ba-border);
-  border-top: 2px solid var(--ba-gold-dim);   /* gold top rule — BA chapter seal */
+  border-top: 2px solid var(--ba-gold-dim);
   position: relative;
   box-shadow: inset 0 0 20px rgba(0,0,0,0.7), 0 0 10px rgba(180,20,0,0.06);
+}
+
+/* ── TACTICAL PANEL — corner bracket treatment ──
+   Apply .panel-tactical to any panel that should have
+   the 40K targeting reticle corners. Pairs with .panel or .mech-panel.
+   The ::before gold rule still works on top — these add the corners.
+*/
+.panel-tactical {
+  position: relative;
+}
+
+.panel-tactical::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  pointer-events: none;
+  background: transparent;
+  /* Four L-shaped corner brackets drawn with box-shadow */
+  box-shadow:
+    /* top-left */
+    -1px  0    0 0 var(--ba-gold-mute),
+     0   -1px  0 0 var(--ba-gold-mute),
+    /* top-right */
+     1px  0    0 0 var(--ba-gold-mute),
+     0   -1px  0 0 var(--ba-gold-mute);
+}
+
+/* Simpler corner approach using pseudo-elements on wrapper children */
+.corner-tl, .corner-tr, .corner-bl, .corner-br {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--ba-gold-dim);
+  border-style: solid;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.corner-tl { top: 4px;  left: 4px;  border-width: 1px 0 0 1px; }
+.corner-tr { top: 4px;  right: 4px; border-width: 1px 1px 0 0; }
+.corner-bl { bottom: 4px; left: 4px;  border-width: 0 0 1px 1px; }
+.corner-br { bottom: 4px; right: 4px; border-width: 0 1px 1px 0; }
+
+/* ── WATERMARK UTILITY ──
+   Apply as an additional element inside any panel:
+   <div class="wm-aquila" />   — imperial aquila at 6% opacity
+   <div class="wm-cog" />      — mechanicus cog at 6% opacity
+*/
+.wm-aquila, .wm-cog {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 60%;
+  opacity: 0.06;
+  z-index: 0;
+}
+.wm-aquila { background-image: url('/the-emperor-protects-1.jpg'); }
+.wm-cog    { background-image: url('/cog.jpeg'); }
+
+/* ── PURITY SEAL UTILITY ──
+   Small decorative element, positioned via parent.
+   <div class="purity-seal" />
+*/
+.purity-seal {
+  width: 60px;
+  height: auto;
+  background-image: url('/purity_seal.jpg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 /* ── 9. TYPOGRAPHY ── */
 .sec-ttl {
   font-size:     12px;
-  color:         var(--ba-gold-dim);           /* gold, not green */
+  color:         var(--ba-gold-dim);
   text-shadow:   0 0 8px rgba(184,146,62,0.35);
   border-bottom: 1px solid var(--ba-border-lo);
   padding-bottom:8px;
@@ -224,7 +324,6 @@ body::before {
 }
 
 /* ── 10. STATUS COLOURS ── */
-/* warn: BA crimson (no more pink) */
 .warn {
   color:       var(--ba-crimson) !important;
   text-shadow: 0 0 10px rgba(204,34,0,0.55) !important;
@@ -242,14 +341,38 @@ body::before {
   animation: blinker 1s step-start infinite;
 }
 
+/* ── THREE-STATE SYNC LED ──
+   .status-led.ok      — uplink established, data flowing (green)
+   .status-led.offline — no sync, local cache intact (amber) — expected
+   .status-led.error   — genuine failure (red, shaking)
+   .status-led.warn    — legacy alias for offline
+*/
 .status-led {
   display:       inline-block;
   width:         9px;
   height:        9px;
   border-radius: 50%;
+  flex-shrink:   0;
 }
-.status-led.ok   { background: var(--border-hi); box-shadow: var(--glow); }
-.status-led.warn { background: var(--ba-crimson); box-shadow: 0 0 8px var(--ba-crimson); }
+
+.status-led.ok {
+  background: var(--led-ok);
+  box-shadow: 0 0 6px var(--led-ok), 0 0 12px rgba(74,222,128,0.4);
+  animation: ledPulseOk 1.8s ease-in-out infinite alternate;
+}
+
+.status-led.offline,
+.status-led.warn {
+  background: var(--led-offline);
+  box-shadow: 0 0 6px var(--led-offline);
+  animation: ledPulseAmber 2s ease-in-out infinite alternate;
+}
+
+.status-led.error {
+  background: var(--led-error);
+  box-shadow: 0 0 8px var(--led-error);
+  animation: ledShake 0.4s ease-in-out infinite;
+}
 
 /* ── 11. RADAR ── */
 .radar-wrap {
@@ -361,8 +484,21 @@ body::before {
 @keyframes blinker { 50% { opacity: 0; } }
 
 @keyframes ledPulseOk {
-  0%   { box-shadow: 0 0 4px #4ade80; }
-  100% { box-shadow: 0 0 12px #4ade80, 0 0 20px #4ade8066; }
+  0%   { box-shadow: 0 0 4px var(--led-ok); }
+  100% { box-shadow: 0 0 12px var(--led-ok), 0 0 20px rgba(74,222,128,0.4); }
+}
+
+@keyframes ledPulseAmber {
+  0%   { box-shadow: 0 0 4px var(--led-offline); opacity: 0.7; }
+  100% { box-shadow: 0 0 10px var(--led-offline), 0 0 18px rgba(234,179,8,0.4); opacity: 1; }
+}
+
+@keyframes ledShake {
+  0%,100% { transform: translateX(0); }
+  20%     { transform: translateX(-2px); }
+  40%     { transform: translateX(2px); }
+  60%     { transform: translateX(-2px); }
+  80%     { transform: translateX(2px); }
 }
 
 /* ── 15. VERTICAL LOG SCROLL ── */
@@ -407,21 +543,18 @@ body::before {
   flex-shrink:     0;
 }
 
-/* TX badge: keep sky-blue — neutral data tag */
 .n-badge-tx {
   background: rgba(56,189,248,0.12);
   border:     1px solid #38bdf8;
   color:      #38bdf8;
 }
 
-/* OK badge: Mechanicum green */
 .n-badge-ok {
   background: rgba(74,222,128,0.12);
   border:     1px solid #4ade80;
   color:      #4ade80;
 }
 
-/* CRIT badge: Blood Angels crimson */
 .n-badge-crit {
   background: rgba(204,34,0,0.15);
   border:     1px solid var(--ba-crimson);
@@ -471,7 +604,6 @@ body::before {
   color:      var(--text-m);
 }
 
-/* Submit / action button: Blood Angels confirm */
 .mech-btn {
   background:    rgba(120,5,5,0.2);
   border:        1px solid var(--ba-crimson);
@@ -494,7 +626,7 @@ body::before {
   text-shadow:0 0 12px rgba(204,34,0,0.8);
 }
 
-/* ── 18. ACTION BUTTONS (ledger) ── */
+/* ── 18. ACTION BUTTONS ── */
 .action-btn {
   background:  transparent;
   border:      1px solid var(--ba-border);

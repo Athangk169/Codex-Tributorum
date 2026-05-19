@@ -25,10 +25,10 @@ const KeywordTag = ({ kw, onDelete }) => {
     <div
       style={{
         display: 'inline-flex', alignItems: 'center',
-        background: pressed ? 'rgba(204,34,0,0.12)' : 'rgba(26,93,44,0.12)',
+        background: 'rgba(26, 93, 44, 0.12)',
         border: `1px solid ${pressed ? 'rgba(204,34,0,0.5)' : 'var(--border)'}`,
-        padding: '5px 9px', gap: '6px', fontSize: '11px',
-        transition: 'all 0.2s',
+        padding: '6px 10px', gap: '8px', fontSize: '11px',
+        transition: 'border-color 0.2s',
       }}
       onTouchStart={() => setPressed(true)}
       onTouchEnd={() => setPressed(false)}
@@ -39,8 +39,9 @@ const KeywordTag = ({ kw, onDelete }) => {
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           style={{
             background: 'none', border: 'none',
-            color: 'var(--ba-crimson)', cursor: 'pointer',
-            fontSize: '12px', padding: '0 2px', lineHeight: 1,
+            color: pressed ? 'var(--ba-crimson)' : 'var(--border)',
+            cursor: 'pointer', fontSize: '10px', padding: '4px',
+            lineHeight: 1, transition: 'color 0.2s',
           }}
         >✕</button>
       )}
@@ -48,97 +49,67 @@ const KeywordTag = ({ kw, onDelete }) => {
   );
 };
 
-// ── Status Bar (replaces lore ticker on mobile) ──
-const StatusBar = ({ statusMsg, rulesCount, loreText }) => (
-  <div style={{
-    padding: '10px 16px',
-    borderTop: '1px solid var(--ba-border-lo)',
-    fontSize: '10px', letterSpacing: '1px',
-    color: statusMsg?.error ? 'var(--ba-crimson)' : 'var(--border-hi)',
-    display: 'flex', alignItems: 'center', gap: '10px',
-    background: 'rgba(0,0,0,0.6)', flexShrink: 0,
-    transition: 'color 0.3s', minHeight: '40px',
-  }}>
-    <span style={{
-      display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%',
-      background: statusMsg?.error ? 'var(--ba-crimson)' : 'var(--border-hi)',
-      boxShadow: statusMsg?.error ? '0 0 6px var(--ba-crimson)' : '0 0 6px var(--border-hi)',
-      flexShrink: 0,
-      animation: statusMsg?.text ? 'blinker 0.6s step-start 3' : 'none',
-    }} />
-    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-      {statusMsg?.text
-        ? statusMsg.text
-        : loreText
-          ? <ScrambleText text={loreText} key={loreText} />
-          : <>// SYSTEM READY :: <ScrambleText text={rulesCount} /> RULES INDEXED</>
-      }
-    </span>
-  </div>
-);
-
-const TABS = ['INDEX', 'TARGET', 'MATRIX'];
-
-const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) => {
-  // ── Data State ──
+const MobileHolo = ({ data, db, userId }) => {
   const [rules, setRules] = useState([]);
-  const [categoryConfig, setCategoryConfig] = useState({ positive_categories: [], neutral_categories: [], expense_categories: [] });
+  const [categoryConfig, setCategoryConfig] = useState({ income_categories: [], neutral_categories: [], expense_categories: [] });
+  
   const [selectedRuleId, setSelectedRuleId] = useState('');
-  const [newKeyword, setNewKeyword] = useState('');
+  
+  // Sheet states
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [showAddKeyword, setShowAddKeyword]   = useState(false);
+  const [editingRule, setEditingRule]         = useState(null);
+
+  // Form states
+  const [newKeyword, setNewKeyword]           = useState('');
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryType, setNewCategoryType] = useState('expense');
-  const [editingRule, setEditingRule] = useState(null);
-  const [editName, setEditName] = useState('');
-  const [statusMsg, setStatusMsg] = useState(null);
+  const [editName, setEditName]               = useState('');
+  
+  const [statusMsg, setStatusMsg]             = useState(null);
+  const [loreIdx, setLoreIdx]                 = useState(0);
 
-  // ── Holo & UI State ──
-  const [activeHolo, setActiveHolo] = useState('baal');
-  const [isHoloExpanded, setIsHoloExpanded] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const [activeTab, setActiveTab] = useState('INDEX');
-  const [loreIndex, setLoreIndex] = useState(0);
-  const [showAddCategory, setShowAddCategory] = useState(false);
-  const [showAddKeyword, setShowAddKeyword] = useState(false);
-
-  // ── Lore Rotation ──
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLoreIndex((prev) => (prev + 1) % loreSnippets.length);
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [loreSnippets.length]);
-
-  // ── DB Load ──
+  // ◈ V2 SCHEMA LOAD ◈
   const loadRules = useCallback(async () => {
     if (!db || !userId) return;
+
     try {
-      const allDocs = await db.allDocs({ include_docs: true });
+      const allDocs = await db.allDocs({ 
+        include_docs: true,
+        startkey: `finance:rule:${userId}:`,
+        endkey:   `finance:rule:${userId}:\uffff`
+      });
+
       const uniqueRules = {};
       allDocs.rows
         .map(row => row.doc)
-        .filter(d => d.type === 'category_rule' && d.user_id === userId)
+        .filter(d => d.type === 'finance:rule' && d.user_id === userId && d.is_active)
         .forEach(rule => { uniqueRules[rule.category_name] = rule; });
 
-      const r = Object.values(uniqueRules).sort((a, b) =>
-        a.category_name.localeCompare(b.category_name)
-      );
+      const r = Object.values(uniqueRules).sort((a, b) => a.category_name.localeCompare(b.category_name));
       setRules(r);
 
       let config;
-      try { config = await db.get(`config_category_types_${userId}`); }
-      catch {
-        try { config = await db.get('config_category_types'); }
-        catch { config = { _id: 'config_category_types', positive_categories: [], neutral_categories: [], expense_categories: [] }; }
+      try {
+        config = await db.get(`finance:config:categories:${userId}`);
+      } catch {
+        config = { _id: `finance:config:categories:${userId}`, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] };
       }
       setCategoryConfig(config);
+
       setSelectedRuleId(prev => (!prev && r.length > 0 ? r[0]._id : prev));
     } catch (err) {
       flash('// DB READ FAILURE', true);
-      console.error(err);
     }
   }, [db, userId]);
 
   useEffect(() => { loadRules(); }, [loadRules, userId]);
+
+  // Lore ticker
+  useEffect(() => {
+    const iv = setInterval(() => setLoreIdx(i => (i + 1) % defaultLoreSnippets.length), 8000);
+    return () => clearInterval(iv);
+  }, []);
 
   const flash = (text, error = false) => {
     setStatusMsg({ text, error });
@@ -146,24 +117,23 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
   };
 
   const getCatType = (name) => {
-    if (categoryConfig.positive_categories?.includes(name)) return 'income';
+    if (categoryConfig.income_categories?.includes(name)) return 'income';
     if (categoryConfig.neutral_categories?.includes(name)) return 'neutral';
     return 'expense';
   };
 
-  // ── Handlers (mirrored from desktop) ──
   const handleUpdateType = async (categoryName, newType) => {
     try {
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
-      try { conf = await db.get(confId); }
-      catch { conf = { _id: confId, type: 'system_config', user_id: userId, positive_categories: [], neutral_categories: [], expense_categories: [] }; }
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      conf.positive_categories = (conf.positive_categories || []).filter(c => c !== categoryName);
+      conf.income_categories  = (conf.income_categories || []).filter(c => c !== categoryName);
       conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== categoryName);
       conf.expense_categories = (conf.expense_categories || []).filter(c => c !== categoryName);
 
-      if (newType === 'income') conf.positive_categories.push(categoryName);
+      if (newType === 'income') conf.income_categories.push(categoryName);
       else if (newType === 'neutral') conf.neutral_categories.push(categoryName);
       else conf.expense_categories.push(categoryName);
 
@@ -180,7 +150,7 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
     const kw = newKeyword.trim().toLowerCase();
     if (rule.keywords.includes(kw)) { flash('// KEYWORD ALREADY EXISTS', true); return; }
     try {
-      await db.put({ ...rule, keywords: [...rule.keywords, kw] });
+      await db.put({ ...rule, keywords: [...rule.keywords, kw], updated: new Date().toISOString() });
       setNewKeyword('');
       setShowAddKeyword(false);
       flash(`// KEYWORD UPLINKED >> ${kw.toUpperCase()}`);
@@ -192,7 +162,7 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
     const rule = rules.find(r => r._id === ruleId);
     if (!rule) return;
     try {
-      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw) });
+      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw), updated: new Date().toISOString() });
       flash(`// KEYWORD PURGED >> ${kw.toUpperCase()}`);
       loadRules();
     } catch { flash('// WRITE ERROR', true); }
@@ -201,24 +171,33 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
   const handleAddCategory = async () => {
     const name = newCategoryName.trim();
     if (!name || !userId) return;
+
     const slug = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const id = `rule_${slug}`;
+    const id = `finance:rule:${userId}:${slug}`;
+
     if (rules.find(r => r._id === id || r.category_name.toLowerCase() === name.toLowerCase())) {
-      flash('// CATEGORY ALREADY EXISTS', true); return;
+      flash('// CATEGORY ALREADY EXISTS', true);
+      return;
     }
+
     try {
-      await db.put({ _id: id, type: 'category_rule', user_id: userId, category_name: name, keywords: [], is_active: true });
+      await db.put({
+        _id: id, type: 'finance:rule', user_id: userId,
+        category_name: name, keywords: [], is_active: true,
+        created: new Date().toISOString(), updated: new Date().toISOString()
+      });
 
-      const confId = `config_category_types_${userId}`;
+      const confId = `finance:config:categories:${userId}`;
       let conf;
-      try { conf = await db.get(confId); }
-      catch { conf = { _id: confId, type: 'system_config', user_id: userId, positive_categories: [], neutral_categories: [], expense_categories: [] }; }
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      if (newCategoryType === 'income') conf.positive_categories.push(name);
+      if (newCategoryType === 'income') conf.income_categories.push(name);
       else if (newCategoryType === 'neutral') conf.neutral_categories.push(name);
       else conf.expense_categories.push(name);
 
       await db.put(conf);
+
       setNewCategoryName('');
       setNewCategoryType('expense');
       setShowAddCategory(false);
@@ -232,16 +211,18 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
     e.stopPropagation();
     try {
       await db.remove(rule);
-      const confId = `config_category_types_${userId}`;
-      let conf;
-      try { conf = await db.get(confId); }
-      catch { conf = { _id: confId, positive_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      conf.positive_categories = (conf.positive_categories || []).filter(c => c !== rule.category_name);
+      const confId = `finance:config:categories:${userId}`;
+      let conf;
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
+
+      conf.income_categories  = (conf.income_categories || []).filter(c => c !== rule.category_name);
       conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== rule.category_name);
       conf.expense_categories = (conf.expense_categories || []).filter(c => c !== rule.category_name);
 
       await db.put(conf);
+
       if (selectedRuleId === rule._id) setSelectedRuleId('');
       flash(`// CATEGORY EXPUNGED >> ${rule.category_name.toUpperCase()}`);
       loadRules();
@@ -249,24 +230,27 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
   };
 
   const handleRenameSubmit = async (e) => {
-    e?.stopPropagation?.();
+    e.stopPropagation();
     const newName = editName.trim();
     if (!newName || !editingRule) return;
     const rule = rules.find(r => r._id === editingRule._id);
     if (!rule) return;
     const oldName = rule.category_name;
-    try {
-      await db.put({ ...rule, category_name: newName });
-      const confId = `config_category_types_${userId}`;
-      let conf;
-      try { conf = await db.get(confId); }
-      catch { conf = { _id: confId, type: 'system_config', user_id: userId, positive_categories: [], neutral_categories: [], expense_categories: [] }; }
 
-      conf.positive_categories = (conf.positive_categories || []).map(c => c === oldName ? newName : c);
+    try {
+      await db.put({ ...rule, category_name: newName, updated: new Date().toISOString() });
+
+      const confId = `finance:config:categories:${userId}`;
+      let conf;
+      try { conf = await db.get(confId); } 
+      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
+
+      conf.income_categories  = (conf.income_categories || []).map(c => c === oldName ? newName : c);
       conf.neutral_categories = (conf.neutral_categories || []).map(c => c === oldName ? newName : c);
       conf.expense_categories = (conf.expense_categories || []).map(c => c === oldName ? newName : c);
 
       await db.put(conf);
+
       flash(`// CATEGORY RENAMED >> ${newName.toUpperCase()}`);
       setEditingRule(null);
       setEditName('');
@@ -274,384 +258,153 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
     } catch { flash('// WRITE ERROR', true); }
   };
 
-  // ── Holo Expand (with cogitator delay matching desktop) ──
-  const handleExpandToggle = () => {
-    if (isTransitioning) return;
-    setIsTransitioning(true);
-    setTimeout(() => {
-      setIsHoloExpanded(prev => !prev);
-      setIsTransitioning(false);
-    }, 500);
-  };
-
-  // ── Derived ──
   const selectedRule = rules.find(r => r._id === selectedRuleId);
-  const incomes  = rules.filter(r => getCatType(r.category_name) === 'income');
-  const neutrals = rules.filter(r => getCatType(r.category_name) === 'neutral');
-  const expenses = rules.filter(r => getCatType(r.category_name) === 'expense');
 
   return (
-    <div
-      className="mobile-slide-container"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'var(--mono)', color: 'var(--text-m)', position: 'relative', overflow: 'hidden' }}
-    >
-
-      {/* ── Slide-Specific Animations ── */}
+    <div className="mobile-slide-container active" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      
       <style>{`
-        @keyframes targetLockPulse {
-          0%   { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 12px rgba(204,34,0,0.3); background: rgba(204,34,0,0.1); }
-          50%  { box-shadow: inset 0 0 0 1px var(--ba-gold), inset 0 0 20px rgba(201,168,76,0.25); background: rgba(201,168,76,0.1); }
-          100% { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 12px rgba(204,34,0,0.3); background: rgba(204,34,0,0.1); }
-        }
-        .mob-target-locked {
-          animation: targetLockPulse 1.5s ease-in-out infinite !important;
+        .target-locked {
+          background: rgba(204,34,0,0.1) !important;
+          box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 15px rgba(204,34,0,0.2) !important;
           border-color: transparent !important;
         }
-        .mob-target-locked::before {
-          content: ''; position: absolute; top: 4px; left: 4px;
-          width: 6px; height: 6px;
-          border-top: 1px solid var(--ba-crimson); border-left: 1px solid var(--ba-crimson);
-          pointer-events: none;
+        .manifest-row { transition: background 0.2s ease, box-shadow 0.2s ease; position: relative; border: 1px solid var(--border); margin-bottom: 8px; }
+        .manifest-row:active { background: rgba(200,34,0,0.08); }
+
+        .holo-sheet {
+          position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+          background: #060200; border-top: 1px solid var(--ba-crimson);
+          box-shadow: 0 -10px 40px rgba(0,0,0,0.9); padding: 20px 16px 30px 16px;
+          transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
         }
-        .mob-target-locked::after {
-          content: ''; position: absolute; bottom: 4px; right: 4px;
-          width: 6px; height: 6px;
-          border-bottom: 1px solid var(--ba-crimson); border-right: 1px solid var(--ba-crimson);
-          pointer-events: none;
-        }
-        .mob-manifest-row {
-          transition: background 0.2s ease, box-shadow 0.2s ease;
-          position: relative;
-        }
-        .mob-manifest-row:active:not(.mob-target-locked) {
-          background: rgba(200,34,0,0.08) !important;
-          box-shadow: inset 0 0 15px rgba(200,34,0,0.15);
-        }
-        @keyframes dataAssimilate {
-          0%   { opacity: 0; transform: translateY(-6px) scale(0.98); filter: brightness(2); }
-          100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
-        }
-        .mob-assimilate-in {
-          animation: dataAssimilate 0.35s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
-          opacity: 0;
-        }
-        @keyframes overridePulse {
-          0%   { opacity: 0.7; background: rgba(204,34,0,0.2); }
-          50%  { opacity: 1.0; background: rgba(204,34,0,0.6); box-shadow: 0 0 10px rgba(204,34,0,0.5); }
-          100% { opacity: 0.7; background: rgba(204,34,0,0.2); }
-        }
-        .mob-btn-loading {
-          animation: overridePulse 0.4s ease-in-out infinite !important;
-          pointer-events: none;
-          color: #fff !important;
-          border-color: var(--ba-crimson) !important;
-        }
-        @keyframes blinker { 50% { opacity: 0; } }
+        .holo-sheet.open { transform: translateY(0); }
       `}</style>
 
-      {/* ── FULLSCREEN HOLOGRAM OVERLAY ── */}
-      {isHoloExpanded && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: '#000', display: 'flex', flexDirection: 'column' }}>
-          {/* Overlay Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--ba-crimson)', background: 'rgba(0,0,0,0.9)', flexShrink: 0 }}>
-            <span style={{ fontSize: '10px', color: 'var(--ba-crimson)', letterSpacing: '2px' }}>
-              MULTI-SYSTEM ORBITAL RECON // MAXIMIZED UPLINK ACTIVE
-            </span>
-            <button
-              className={`mech-btn ${isTransitioning ? 'mob-btn-loading' : ''}`}
-              onClick={handleExpandToggle}
-              style={{ margin: 0, padding: '6px 12px', fontSize: '9px', width: 'auto', background: 'rgba(204,34,0,0.15)', color: '#fff', borderColor: 'var(--ba-crimson)' }}
-            >
-              {isTransitioning ? '[ REVERTING... ]' : '[ COLLAPSE ]'}
-            </button>
-          </div>
-          {/* Overlay Toggle */}
-          <div style={{ display: 'flex', gap: '6px', padding: '10px 16px', background: 'rgba(0,0,0,0.9)', flexShrink: 0 }}>
-            <button className="mech-btn" onClick={() => setActiveHolo('baal')} style={{ flex: 1, margin: 0, padding: '8px', fontSize: '10px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.15)' : 'transparent', color: activeHolo === 'baal' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--ba-border-lo)' }}>[ BAAL PRIME ]</button>
-            <button className="mech-btn" onClick={() => setActiveHolo('terra')} style={{ flex: 1, margin: 0, padding: '8px', fontSize: '10px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.15)' : 'transparent', color: activeHolo === 'terra' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--ba-border-lo)' }}>[ HOLY TERRA ]</button>
-          </div>
-          {/* Overlay Iframe */}
-          <div style={{ flex: 1, position: 'relative' }}>
-            <iframe title="Orbital Holo Survey" src={activeHolo === 'baal' ? 'Baal_holo.html' : 'Terra_holo.html'} style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }} />
-            <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10 }} />
-          </div>
+      {/* ── TOP HEADER / STATUS ── */}
+      <div style={{ padding: '16px', borderBottom: '1px solid var(--ba-border-lo)', background: 'linear-gradient(180deg, #0a0200 0%, #000 100%)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span style={{ fontSize: '10px', color: 'var(--ba-gold-dim)', letterSpacing: '2px' }}>ORBITAL CLASSIFICATION</span>
+          <span style={{ color: statusMsg?.error ? 'var(--ba-crimson)' : 'var(--border-hi)', fontSize: '10px' }}>
+            {statusMsg ? (statusMsg.text) : (<><ScrambleText text={rules.length} /> FILES</>)}
+          </span>
         </div>
-      )}
-
-      {/* ── HEADER ── */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--ba-border-lo)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: 'rgba(0,0,0,0.4)' }}>
-        <span style={{ fontSize: '11px', color: '#fff', letterSpacing: '3px' }}>
-          <ScrambleText text="HOLO-LITHIC ARCHIVE" />
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--border-hi)', boxShadow: '0 0 6px var(--border-hi)', display: 'inline-block' }} />
-          <span style={{ fontSize: '9px', color: 'var(--text-d)', letterSpacing: '1px' }}>UPLINK ACTIVE</span>
+        <div style={{ fontSize: '9px', color: '#4a2010', fontStyle: 'italic', letterSpacing: '1px' }}>
+          <ScrambleText text={defaultLoreSnippets[loreIdx]} />
         </div>
       </div>
 
-      {/* ── COMPACT HOLOGRAM PANEL ── */}
-      <div className="panel mech-panel" style={{ margin: '12px 16px 0', padding: 0, flexShrink: 0 }}>
-        {/* Panel Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--ba-border-lo)' }}>
-          <span style={{ fontSize: '10px', letterSpacing: '1.5px', color: 'var(--ba-gold-mute)' }}>ORBITAL RECON</span>
-          <button
-            className={`mech-btn ${isTransitioning ? 'mob-btn-loading' : ''}`}
-            onClick={handleExpandToggle}
-            style={{ margin: 0, padding: '4px 10px', fontSize: '9px', width: 'auto' }}
-          >
-            {isTransitioning ? '[ OVERRIDE... ]' : '[ MAXIMIZE ]'}
-          </button>
-        </div>
-        {/* Planet Toggle */}
-        <div style={{ display: 'flex', gap: '6px', padding: '8px 12px', borderBottom: '1px solid var(--ba-border-lo)' }}>
-          <button className="mech-btn" onClick={() => setActiveHolo('baal')} style={{ flex: 1, margin: 0, padding: '6px', fontSize: '9px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.15)' : 'transparent', color: activeHolo === 'baal' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--ba-border-lo)' }}>[ BAAL PRIME ]</button>
-          <button className="mech-btn" onClick={() => setActiveHolo('terra')} style={{ flex: 1, margin: 0, padding: '6px', fontSize: '9px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.15)' : 'transparent', color: activeHolo === 'terra' ? '#fff' : 'var(--ba-gold-mute)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--ba-border-lo)' }}>[ HOLY TERRA ]</button>
-        </div>
-        {/* Hologram Iframe */}
-        <div style={{ height: '140px', position: 'relative', background: '#000' }}>
-          <iframe
-            title="Orbital Holo Survey"
-            src={activeHolo === 'baal' ? '/Baal_holo.html' : '/Terra_holo.html'}
-            style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }}
-          />
-          <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10 }} />
-        </div>
-      </div>
+      {/* ── SCROLLABLE LIST OF CATEGORIES ── */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+        {rules.map((rule) => {
+          const isSelected = selectedRuleId === rule._id;
+          const type = getCatType(rule.category_name);
+          const typeColor = type === 'income' ? 'var(--border-hi)' : type === 'neutral' ? 'var(--ba-gold)' : 'var(--ba-crimson)';
 
-      {/* ── TABS ── */}
-      <div style={{ display: 'flex', margin: '12px 16px 0', borderBottom: '1px solid var(--ba-border-lo)', flexShrink: 0 }}>
-        {TABS.map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              flex: 1, background: 'none', border: 'none',
-              borderBottom: `2px solid ${activeTab === tab ? 'var(--ba-crimson)' : 'transparent'}`,
-              color: activeTab === tab ? '#fff' : 'var(--text-d)',
-              fontFamily: 'var(--mono)', fontSize: '9px', letterSpacing: '1.5px',
-              padding: '8px 4px', cursor: 'pointer', transition: 'all 0.2s',
-              marginBottom: '-1px',
-            }}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* ── TAB CONTENT (scrollable) ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', minHeight: 0 }}>
-
-        {/* ── INDEX TAB ── */}
-        {activeTab === 'INDEX' && (
-          <div className="mob-assimilate-in" style={{ opacity: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '9px', color: 'var(--text-d)', letterSpacing: '2px' }}>CATEGORY INDEX</span>
-              <span style={{ fontSize: '9px', color: 'var(--text-m)' }}><ScrambleText text={rules.length} /> TOTAL</span>
-            </div>
-
-            {rules.map((rule, index) => {
-              const isSelected = selectedRuleId === rule._id;
-              const type = getCatType(rule.category_name);
-              const typeColor = type === 'income' ? 'var(--border-hi)' : type === 'neutral' ? 'var(--ba-gold)' : 'var(--ba-crimson)';
-              return (
-                <div
-                  key={rule._id}
-                  className={`mob-manifest-row ${isSelected ? 'mob-target-locked' : ''}`}
-                  onClick={() => { setSelectedRuleId(rule._id); setActiveTab('TARGET'); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '12px 10px', marginBottom: '6px',
-                    border: '1px solid var(--border)',
-                    cursor: 'pointer', minHeight: '48px',
-                    animationDelay: `${Math.min(index * 0.04, 0.3)}s`,
-                  }}
-                >
-                  {editingRule?._id === rule._id ? (
-                    <div style={{ display: 'flex', gap: '6px', flex: 1 }} onClick={e => e.stopPropagation()}>
-                      <input
-                        className="mech-input"
-                        value={editName}
-                        onChange={e => setEditName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') handleRenameSubmit(e); if (e.key === 'Escape') setEditingRule(null); }}
-                        autoFocus
-                        style={{ marginTop: 0, flex: 1, fontSize: '12px' }}
-                      />
-                      <button className="action-btn" onClick={handleRenameSubmit} style={{ padding: '4px 10px' }}>✓</button>
-                      <button className="action-btn" onClick={() => setEditingRule(null)} style={{ padding: '4px 10px' }}>✕</button>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                        <span style={{ color: typeColor, fontSize: '8px' }}>■</span>
-                        <span style={{ fontSize: '12px', color: isSelected ? '#fff' : 'var(--text-m)' }}>
-                          {isSelected ? '▶ ' : ''}{rule.category_name.toUpperCase()}
-                          <span style={{ color: 'var(--text-d)', fontSize: '10px', marginLeft: '8px', opacity: 0.6 }}>[{rule.keywords.length}]</span>
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                        <button
-                          className="action-btn"
-                          onClick={e => { e.stopPropagation(); setEditingRule(rule); setEditName(rule.category_name); }}
-                          style={{ padding: '6px 10px', fontSize: '9px' }}
-                        >EDIT</button>
-                        <button
-                          className="action-btn del"
-                          onClick={e => handleDeleteCategory(rule, e)}
-                          style={{ padding: '6px 10px', fontSize: '9px' }}
-                        >DEL</button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-
-            <button
-              onClick={() => setShowAddCategory(true)}
-              className="mech-btn"
-              style={{ width: '100%', margin: '10px 0 0', padding: '12px', fontSize: '10px', letterSpacing: '2px' }}
-            >
-              + NEW CATEGORY
-            </button>
-          </div>
-        )}
-
-        {/* ── TARGET LOCK TAB ── */}
-        {activeTab === 'TARGET' && (
-          <div className="mob-assimilate-in" style={{ opacity: 0 }}>
-            {!selectedRule ? (
-              <div style={{ color: 'var(--text-d)', fontSize: '11px', textAlign: 'center', marginTop: '40px', letterSpacing: '1px' }}>
-                // AWAITING TARGET SELECTION
-              </div>
-            ) : (
-              <>
-                {/* Category Header + Type Select */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '10px', borderBottom: '1px dashed rgba(204,34,0,0.3)' }}>
-                  <span style={{ fontSize: '12px', color: '#fff', letterSpacing: '1px' }}>▶ {selectedRule.category_name.toUpperCase()}</span>
-                  <select
-                    className="mech-select"
-                    value={getCatType(selectedRule.category_name)}
-                    onChange={e => handleUpdateType(selectedRule.category_name, e.target.value)}
-                    style={{ width: '110px', marginTop: 0, fontSize: '10px' }}
-                  >
-                    <option value="expense">EXPENSE</option>
-                    <option value="income">INCOME</option>
-                    <option value="neutral">NEUTRAL</option>
-                  </select>
-                </div>
-
-                {/* Keywords */}
-                <div style={{ fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '2px', borderBottom: '1px solid var(--ba-border-lo)', paddingBottom: '6px', marginBottom: '12px' }}>
-                  ASSIGNED KEYWORDS [{selectedRule.keywords.length}]
-                </div>
-
-                {selectedRule.keywords.length === 0 ? (
-                  <div style={{ color: 'var(--ba-gold-mute)', fontSize: '10px', marginBottom: '16px' }}>// NO KEYWORDS DETECTED</div>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
-                    {selectedRule.keywords.map(kw => (
-                      <KeywordTag key={kw} kw={kw} onDelete={() => handleDeleteKeyword(selectedRuleId, kw)} />
-                    ))}
+          return (
+            <div key={rule._id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '12px' }}>
+              
+              {/* Category Header Row */}
+              <div 
+                className={`manifest-row ${isSelected ? 'target-locked' : ''}`}
+                onClick={() => setSelectedRuleId(isSelected ? '' : rule._id)} 
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', margin: 0 }}
+              >
+                {editingRule?._id === rule._id ? (
+                  <div style={{ display: 'flex', gap: '8px', flex: 1 }} onClick={e => e.stopPropagation()}>
+                    <input className="mech-input" value={editName} onChange={e => setEditName(e.target.value)} style={{ marginTop: 0, flex: 1 }} />
+                    <button className="mob-action-btn edit-active" onClick={handleRenameSubmit}>✓</button>
+                    <button className="mob-action-btn" onClick={() => setEditingRule(null)}>✕</button>
                   </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, overflow: 'hidden' }}>
+                      <span style={{ color: typeColor, fontSize: '10px' }}>■</span>
+                      <span style={{ fontSize: '13px', color: isSelected ? '#fff' : 'var(--text-m)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: isSelected ? 'bold' : 'normal' }}>
+                        {rule.category_name.toUpperCase()}
+                      </span>
+                      <span style={{ color: 'var(--text-d)', fontSize: '10px' }}>[{rule.keywords.length}]</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button className="mob-action-btn" onClick={(e) => { e.stopPropagation(); setEditingRule(rule); setEditName(rule.category_name); }}>EDIT</button>
+                      <button className="mob-action-btn del" onClick={(e) => handleDeleteCategory(rule, e)}>DEL</button>
+                    </div>
+                  </>
                 )}
-
-                <button
-                  onClick={() => setShowAddKeyword(true)}
-                  className="mech-btn"
-                  style={{ width: '100%', margin: 0, padding: '12px', fontSize: '10px', letterSpacing: '2px', background: 'rgba(26,93,44,0.2)', borderColor: 'var(--border-hi)', color: '#fff' }}
-                >
-                  + UPLINK KEYWORD
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ── MATRIX TAB ── */}
-        {activeTab === 'MATRIX' && (
-          <div className="mob-assimilate-in" style={{ opacity: 0, display: 'flex', flexDirection: 'column', gap: '22px' }}>
-            {[
-              { label: 'INCOME STREAMS',    color: 'var(--border-hi)',  items: incomes,  bg: 'rgba(74,222,128,0.05)', border: 'rgba(74,222,128,0.3)' },
-              { label: 'NEUTRAL TRANSFERS', color: 'var(--ba-gold)',    items: neutrals, bg: 'rgba(201,168,76,0.05)', border: 'rgba(201,168,76,0.3)' },
-              { label: 'EXPENSE OUTFLOWS',  color: 'var(--ba-crimson)', items: expenses, bg: 'rgba(204,34,0,0.05)',   border: 'rgba(204,34,0,0.3)' },
-            ].map(({ label, color, items, bg, border }) => (
-              <div key={label}>
-                <div style={{ fontSize: '10px', color, borderBottom: `1px dashed ${color}`, paddingBottom: '4px', marginBottom: '10px', letterSpacing: '1px' }}>
-                  {label} // <ScrambleText text={items.length} />
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {items.length === 0
-                    ? <span style={{ color: 'var(--text-d)', fontSize: '10px' }}>// NONE</span>
-                    : items.map(r => (
-                        <span
-                          key={r._id}
-                          onClick={() => { setSelectedRuleId(r._id); setActiveTab('TARGET'); }}
-                          style={{ fontSize: '10px', background: bg, padding: '5px 8px', border: `1px solid ${border}`, color, cursor: 'pointer' }}
-                        >
-                          {r.category_name}
-                        </span>
-                      ))
-                  }
-                </div>
               </div>
-            ))}
-          </div>
-        )}
+
+              {/* Expanded Details (Keywords & Type) */}
+              {isSelected && !editingRule && (
+                <div style={{ padding: '12px 14px', background: 'rgba(204,34,0,0.03)', border: '1px solid rgba(204,34,0,0.1)', borderTop: 'none', marginLeft: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                    <span style={{ fontSize: '10px', color: 'var(--text-d)' }}>CLASS TYPE</span>
+                    <select className="mech-select" value={type} onChange={(e) => handleUpdateType(rule.category_name, e.target.value)} style={{ width: '120px', margin: 0, padding: '6px' }}>
+                      <option value="expense">EXPENSE</option>
+                      <option value="income">INCOME</option>
+                      <option value="neutral">NEUTRAL</option>
+                    </select>
+                  </div>
+
+                  <div style={{ fontSize: '10px', color: 'var(--ba-gold-dim)', marginBottom: '10px' }}>UPLINKED KEYWORDS</div>
+                  {rule.keywords.length === 0 ? (
+                    <div style={{ color: 'var(--text-d)', fontSize: '11px', fontStyle: 'italic', marginBottom: '10px' }}>// NO KEYWORDS DETECTED</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+                      {rule.keywords.map(kw => <KeywordTag key={kw} kw={kw} onDelete={() => handleDeleteKeyword(rule._id, kw)} />)}
+                    </div>
+                  )}
+
+                  <button className="mech-btn" onClick={() => setShowAddKeyword(true)} style={{ width: '100%', margin: 0, padding: '10px', fontSize: '10px', borderColor: 'var(--border-hi)', color: 'var(--border-hi)' }}>
+                    + ADD KEYWORD
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* ── STATUS BAR (lore ticker + flash messages) ── */}
-      <StatusBar
-        statusMsg={statusMsg}
-        rulesCount={rules.length}
-        loreText={!statusMsg ? loreSnippets[loreIndex] : null}
-      />
+      {/* ── FLOATING ACTION BUTTON ── */}
+      <div style={{ padding: '16px', borderTop: '1px solid var(--ba-border-lo)', background: '#0a0200', flexShrink: 0 }}>
+        <button 
+          className="mech-btn" 
+          onClick={() => setShowAddCategory(true)}
+          style={{ width: '100%', padding: '14px', fontSize: '12px', borderColor: 'var(--ba-crimson)', margin: 0 }}
+        >
+          [ AUTHORIZE NEW CATEGORY ]
+        </button>
+      </div>
 
-      {/* ── ADD CATEGORY BOTTOM SHEET ── */}
-      <div
-        style={{
-          position: 'fixed', bottom: 0, left: 0, width: '100%',
-          background: 'var(--bg, #02080c)', borderTop: '2px solid var(--ba-crimson)',
-          padding: '20px 20px calc(20px + env(safe-area-inset-bottom))',
-          zIndex: 50, transition: 'transform 0.3s ease-in-out',
-          transform: showAddCategory ? 'translateY(0)' : 'translateY(100%)',
-        }}
-      >
-        <div style={{ fontSize: '10px', color: '#fff', letterSpacing: '2px', marginBottom: '16px' }}>// NEW CATEGORY INITIALIZATION</div>
+      {/* ══════════════════════════════════════════
+          BOTTOM SHEETS
+          ══════════════════════════════════════════ */}
+      
+      {/* ── Add Category Sheet ── */}
+      <div className={`holo-sheet ${showAddCategory ? 'open' : ''}`}>
+        <div style={{ fontSize: '11px', color: '#fff', letterSpacing: '2px', marginBottom: '16px' }}>
+          // NEW CATEGORY DESIGNATION
+        </div>
         <input
           className="mech-input"
-          placeholder="CATEGORY DESIGNATION..."
+          placeholder="TARGET NAME..."
           value={newCategoryName}
           onChange={e => setNewCategoryName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
-          style={{ width: '100%', fontSize: '13px', marginBottom: '10px' }}
+          style={{ width: '100%', fontSize: '14px', marginBottom: '12px' }}
         />
-        <select
-          className="mech-select"
-          value={newCategoryType}
-          onChange={e => setNewCategoryType(e.target.value)}
-          style={{ width: '100%', marginBottom: '14px', fontSize: '12px' }}
-        >
-          <option value="expense">EXPENSE</option>
-          <option value="income">INCOME</option>
-          <option value="neutral">NEUTRAL</option>
+        <select className="mech-select" value={newCategoryType} onChange={e => setNewCategoryType(e.target.value)} style={{ width: '100%', fontSize: '13px', marginBottom: '20px' }}>
+          <option value="expense">EXPENSE OUTFLOW</option>
+          <option value="income">INCOME STREAM</option>
+          <option value="neutral">NEUTRAL TRANSFER</option>
         </select>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="mech-btn" onClick={handleAddCategory} style={{ flex: 1, margin: 0, padding: '12px', fontSize: '11px' }}>INITIALIZE</button>
-          <button className="mech-btn" onClick={() => setShowAddCategory(false)} style={{ flex: 1, margin: 0, padding: '12px', fontSize: '11px', color: 'var(--text-d)', borderColor: 'var(--ba-border-lo)' }}>ABORT</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="mech-btn" onClick={handleAddCategory} style={{ flex: 1, margin: 0, padding: '14px', background: 'rgba(204,34,0,0.2)' }}>AUTHORIZE</button>
+          <button className="mech-btn" onClick={() => setShowAddCategory(false)} style={{ flex: 1, margin: 0, padding: '14px', color: 'var(--text-d)', borderColor: 'var(--ba-border-lo)' }}>ABORT</button>
         </div>
       </div>
 
-      {/* ── ADD KEYWORD BOTTOM SHEET ── */}
-      <div
-        style={{
-          position: 'fixed', bottom: 0, left: 0, width: '100%',
-          background: 'var(--bg, #02080c)', borderTop: '2px solid var(--border-hi)',
-          padding: '20px 20px calc(20px + env(safe-area-inset-bottom))',
-          zIndex: 50, transition: 'transform 0.3s ease-in-out',
-          transform: showAddKeyword ? 'translateY(0)' : 'translateY(100%)',
-        }}
-      >
-        <div style={{ fontSize: '10px', color: '#fff', letterSpacing: '2px', marginBottom: '16px' }}>
+      {/* ── Add Keyword Sheet ── */}
+      <div className={`holo-sheet ${showAddKeyword ? 'open' : ''}`}>
+        <div style={{ fontSize: '11px', color: '#fff', letterSpacing: '2px', marginBottom: '16px' }}>
           // UPLINK KEYWORD TO {selectedRule?.category_name?.toUpperCase()}
         </div>
         <input
@@ -671,8 +424,8 @@ const MobileHolo = ({ loreSnippets = defaultLoreSnippets, data, db, userId }) =>
 
       {/* ── DIM OVERLAY for bottom sheets ── */}
       {(showAddCategory || showAddKeyword) && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 40 }}
+        <div 
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 999 }}
           onClick={() => { setShowAddCategory(false); setShowAddKeyword(false); }}
         />
       )}

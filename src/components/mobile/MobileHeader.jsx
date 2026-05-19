@@ -61,7 +61,9 @@ export const MobileHeader = ({ financeData, user, syncLed = 'idle' }) => {
   const ledClass = { 
     idle: 'led-ba-idle', 
     ok: 'led-ba-ok', 
-    warn: 'led-ba-warn', 
+    warn: 'led-ba-warn',
+    offline: 'led-ba-warn',
+    error: 'led-ba-red', 
     red: 'led-ba-red' 
   }[syncLed] || 'led-ba-idle';
 

@@ -1,8 +1,8 @@
 // src/components/slides/LedgerSlide.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { CategorizationEngine } from '../../utils/engine';
+import { CategorizationEngine, AREngine } from '../../utils/engine';
 
-// ── Cryptographic Placeholder Component ──
+// ── CryptoPlaceholder ─────────────────────────────────────────
 const CryptoPlaceholder = ({ text, active }) => {
   const [display, setDisplay] = useState(text);
 
@@ -25,21 +25,21 @@ const CryptoPlaceholder = ({ text, active }) => {
   if (!active) return null;
 
   return (
-    <div style={{ 
-      position: 'absolute', top: '35px', left: '12px', 
-      color: 'var(--ba-gold-mute)', pointerEvents: 'none', 
-      fontFamily: 'var(--mono)', fontSize: '12px', opacity: 0.7 
+    <div style={{
+      position: 'absolute', top: '35px', left: '12px',
+      color: 'var(--ba-gold-mute)', pointerEvents: 'none',
+      fontFamily: 'var(--mono)', fontSize: '12px', opacity: 0.7
     }}>
       {display}
     </div>
   );
 };
 
+// ── LedgerServoSkull ──────────────────────────────────────────
 const LedgerServoSkull = ({ x, y, status }) => {
   const containerRef = useRef(null);
   const mvRef        = useRef(null);
-  const trackingCooldownRef = useRef(false); // ← NEW
-  
+  const trackingCooldownRef = useRef(false);
   const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
@@ -48,10 +48,7 @@ const LedgerServoSkull = ({ x, y, status }) => {
     if (!container) return;
     container.innerHTML = '';
     const mv = document.createElement('model-viewer');
-    const glbPath = window.electronDistPath?.distPath
-      ? `file:///${window.electronDistPath.distPath.replace(/^\//, '')}/servo-skull_warhammer.glb`
-      : 'servo-skull_warhammer.glb';
-    mv.setAttribute('src', glbPath);
+    mv.setAttribute('src', '/servo-skull_warhammer.glb');
     mv.setAttribute('camera-orbit', '45deg 75deg 2.5m');
     mv.setAttribute('disable-zoom', '');
     mv.setAttribute('interaction-prompt', 'none');
@@ -70,15 +67,11 @@ const LedgerServoSkull = ({ x, y, status }) => {
     };
   }, []);
 
-  // ── Action State Camera Controls ──
   useEffect(() => {
     if (!mvRef.current) return;
     mvRef.current.style.transition = 'filter 0.5s ease';
-
     if (status === 'idle') {
-      // ✅ FIX 1: Explicitly reset orbit on dock return
       mvRef.current.setAttribute('camera-orbit', '45deg 75deg 2.5m');
-      // ✅ FIX 3: Cooldown prevents mouse immediately hijacking after state change
       trackingCooldownRef.current = true;
       setTimeout(() => { trackingCooldownRef.current = false; }, 800);
     } else if (status === 'focus') {
@@ -86,8 +79,7 @@ const LedgerServoSkull = ({ x, y, status }) => {
     } else {
       mvRef.current.setAttribute('camera-orbit', '45deg 75deg 2.5m');
     }
-
-    switch(status) {
+    switch (status) {
       case 'idle':   mvRef.current.style.filter = 'sepia(1) saturate(2) hue-rotate(85deg) brightness(0.7)'; break;
       case 'focus':  mvRef.current.style.filter = 'sepia(1) saturate(5) hue-rotate(-10deg) brightness(1.2)'; break;
       case 'scan':   mvRef.current.style.filter = 'sepia(1) saturate(5) hue-rotate(85deg) brightness(1.4)'; break;
@@ -97,85 +89,63 @@ const LedgerServoSkull = ({ x, y, status }) => {
     }
   }, [status]);
 
-  // ── Cursor Tracking Logic (Idle Only) ──
   useEffect(() => {
     const handleMouseMove = (e) => {
-      // ✅ FIX 3: Respect cooldown so dock transition isn't immediately stomped
       if (status !== 'idle' || trackingCooldownRef.current) {
         setMouseOffset({ x: 0, y: 0 });
         return;
       }
-
       const normX = (e.clientX / window.innerWidth) * 2 - 1;
       const normY = (e.clientY / window.innerHeight) * 2 - 1;
       setMouseOffset({ x: normX * 10, y: normY * 10 });
-
       if (mvRef.current) {
-        // ✅ FIX 2: Wider theta sweep (+/-45 deg), clamped phi avoids gimbal lock
         const theta      = 45 - (normX * 70);
         const phi        = 75 - (normY * 30);
         const clampedPhi = Math.max(45, Math.min(120, phi));
         mvRef.current.setAttribute('camera-orbit', `${theta}deg ${clampedPhi}deg 2.5m`);
       }
     };
-
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [status]);
 
-  // ... rest of JSX unchanged
-
   return (
-    <div 
-      style={{ 
-        position: 'absolute', 
-        top: 0, left: 0, 
-        width: '68px', height: '68px',
-        transform: `translate(${x}px, ${y}px)`,
-        transition: 'transform 2.5s ease-in-out', 
-        zIndex: 100,
-        pointerEvents: 'none'
-      }}
-    >
-      <div 
+    <div style={{
+      position: 'absolute', top: 0, left: 0,
+      width: '68px', height: '68px',
+      transform: `translate(${x}px, ${y}px)`,
+      transition: 'transform 2.5s ease-in-out',
+      zIndex: 100, pointerEvents: 'none'
+    }}>
+      <div
         className={`servo-skull-inquisitor ${status === 'error' ? 'skull-shake' : ''}`}
-        style={{ 
+        style={{
           width: '100%', height: '100%',
           transform: `translate(${mouseOffset.x}px, ${mouseOffset.y}px)`,
           transition: 'transform 0.2s ease-out',
         }}
       >
         <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-        
-        {/* NEW: Input Scanning Laser Effect */}
         {status === 'focus' && (
           <div className="typing-laser" style={{
-            position: 'absolute', 
-            right: '45px', // Start from left side of skull
-            top: '36px',   // Eye level
-            width: '180px',// Project far into the input field
-            height: '2px',
+            position: 'absolute', right: '45px', top: '36px',
+            width: '180px', height: '2px',
             background: 'linear-gradient(270deg, #cc2200 0%, rgba(204,34,0,0) 100%)',
             boxShadow: '0 0 10px 2px rgba(204,34,0,0.8)',
-            transformOrigin: 'right center',
-            zIndex: -1
+            transformOrigin: 'right center', zIndex: -1
           }} />
         )}
-
-        {/* Ledger Row Scan Effect */}
         {status === 'scan' && (
           <div className="laser-sweep" style={{
             position: 'absolute', left: '50%', top: '55px', width: '2px',
             background: '#4ade80', boxShadow: '0 0 12px 2px #4ade80', zIndex: -1
           }} />
         )}
-        
-        {/* Warning Targeting Effect */}
         {status === 'delete' && (
           <div style={{
             position: 'absolute', left: '50%', top: '50%', width: '150px', height: '1px',
-            background: 'linear-gradient(90deg, #cc2200, transparent)', transform: 'translateY(-50%)',
-            opacity: 0.6, zIndex: -1
+            background: 'linear-gradient(90deg, #cc2200, transparent)',
+            transform: 'translateY(-50%)', opacity: 0.6, zIndex: -1
           }} />
         )}
       </div>
@@ -183,47 +153,47 @@ const LedgerServoSkull = ({ x, y, status }) => {
   );
 };
 
+// ── LedgerSlide ───────────────────────────────────────────────
 const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
-  const transactions = data?.transactions || [];
-  const accounts = data?.accounts || [];
-  const cards = data?.cards || [];
-  const categories = [
-                        ...(data?.expenseCategories  || []),
-                        ...(data?.positiveCategories || []),
-                        ...(data?.neutralCategories  || []),
-                      ];
+  const transactions       = data?.transactions       || [];
+  const accounts           = data?.accounts           || [];
+  const cards              = data?.cards              || [];
   const positiveCategories = data?.positiveCategories || [];
-  const neutralCategories = data?.neutralCategories || [];
+  const neutralCategories  = data?.neutralCategories  || [];
+  const allCategories = [
+    ...(data?.expenseCategories  || []),
+    ...(data?.positiveCategories || []),
+    ...(data?.neutralCategories  || []),
+  ];
+
+  // All previously used AR tags — drives datalist autocomplete
+  const existingTags = AREngine.getAllTags(transactions);
 
   const slideRef = useRef(null);
-  const rowRef = useRef(null);
+  const rowRef   = useRef(null);
 
-  const [formData, setFormData] = useState({
+  const blankForm = {
     date: new Date().toISOString().split('T')[0],
-    description: '',
-    amount: '',
-    method: 'Bank',
+    description: '', amount: '', method: '',
     category: 'Uncategorized',
-    isReimbursable: false
-  });
+    isReimbursable: false, reimbursementTag: '', notes: '',
+  };
 
-  const [isEditing, setIsEditing] = useState(null);
-  const [lastAddedId, setLastAddedId] = useState(null);
-
+  const [formData,      setFormData]      = useState(blankForm);
+  const [isEditing,     setIsEditing]     = useState(null);
+  const [lastAddedId,   setLastAddedId]   = useState(null);
   const [isDescFocused, setIsDescFocused] = useState(false);
-  const [isAmtFocused, setIsAmtFocused] = useState(false);
+  const [isAmtFocused,  setIsAmtFocused]  = useState(false);
 
-  // FIX: When accounts load in, seed `method` to the first real account name.
-  // Without this, the select's controlled value stays as the literal string
-  // 'Bank' (which matches no option), so the browser shows the first account
-  // visually but React still submits sub_account: 'Bank' on a fresh form.
+  // Seed method when accounts load
   useEffect(() => {
-    if (formData.method === 'Bank' && accounts.length > 0) {
-      setFormData(prev => ({ ...prev, method: accounts[0].name }));
+    if (!formData.method && accounts.length > 0) {
+      const firstSubId = accounts[0]._id?.split(':').pop() || '';
+      setFormData(prev => ({ ...prev, method: firstSubId }));
     }
   }, [accounts]);
 
-  // Skull State
+  // Skull state
   const idleDock = { x: 380, y: 8 };
   const [skullState, setSkullState] = useState({ ...idleDock, status: 'idle' });
 
@@ -233,39 +203,42 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       return;
     }
     const slideRect = slideRef.current.getBoundingClientRect();
-    const elRect = element.getBoundingClientRect();
-    
+    const elRect    = element.getBoundingClientRect();
     setSkullState({
       x: elRect.right - slideRect.left + offsetX,
-      y: elRect.top - slideRect.top + offsetY - 15,
+      y: elRect.top   - slideRect.top  + offsetY - 15,
       status
     });
   };
 
   useEffect(() => {
-    if (lastAddedId && rowRef.current) {
-      rowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => aimSkull(rowRef.current, -80, -10, 'scan'), 300); 
+    if (!lastAddedId || !rowRef.current) return;
 
-      const timer = setTimeout(() => {
-        setLastAddedId(null);
-        aimSkull(null);
-      }, 2500); 
+    // Instant scroll so the row is in its final position before we read coordinates
+    rowRef.current.scrollIntoView({ behavior: 'instant', block: 'center' });
 
-      return () => clearTimeout(timer);
-    }
+    // Clear the target-lock highlight after a moment
+    const t = setTimeout(() => {
+      setLastAddedId(null);
+    }, 2800);
+
+    return () => clearTimeout(t);
   }, [lastAddedId, transactions]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [name]: value };
+      if (name === 'category' && value === 'Reimbursement Received')
+        next.isReimbursable = true;
+      return next;
+    });
   };
 
   const handleFocus = (e, type) => {
     if (type === 'desc') setIsDescFocused(true);
-    if (type === 'amt') setIsAmtFocused(true);
-    // Put skull 30px to the right of the field so the laser projects properly left
-    aimSkull(e.target, 30, 0, 'focus'); 
+    if (type === 'amt')  setIsAmtFocused(true);
+    aimSkull(e.target, 30, 0, 'focus');
   };
 
   const handleBlur = (e, type) => {
@@ -278,77 +251,128 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     aimSkull(null);
     const desc = e.target.value;
     if (!desc || !dbMetadata || !user) return;
+    const suggested = await CategorizationEngine.autoTag(desc, dbMetadata, user);
+    if (suggested !== 'Uncategorized')
+      setFormData(prev => ({
+        ...prev,
+        category:       suggested,
+        isReimbursable: suggested === 'Reimbursement Received' ? true : prev.isReimbursable,
+      }));
+  };
 
-    const suggestedCategory = await CategorizationEngine.autoTag(desc, dbMetadata, user);
-    if (suggestedCategory !== 'Uncategorized') {
-      setFormData(prev => ({ ...prev, category: suggestedCategory }));
-    }
+  // Resolve account_type from subaccount ID
+  const resolveAccountType = (subId) => {
+    if (!subId || subId === 'cash_main') return 'Cash';
+    if (cards.find(c => c._id?.split(':').pop() === subId)) return 'Card';
+    return 'Bank';
+  };
+
+  // Resolve display label from sub_account ID
+  const resolveMethodLabel = (subId) => {
+    if (!subId) return 'UNKNOWN';
+    if (subId === 'cash_main') return 'CASH';
+    const card = cards.find(c => c._id?.split(':').pop() === subId);
+    if (card) return card.name.toUpperCase();
+    const acc = accounts.find(a => a._id?.split(':').pop() === subId);
+    if (acc) return acc.name.toUpperCase();
+    // Legacy fallback — old transactions stored display names
+    const accByName = accounts.find(a => a.name === subId);
+    if (accByName) return accByName.name.toUpperCase();
+    const cardByName = cards.find(c => c.name === subId);
+    if (cardByName) return cardByName.name.toUpperCase();
+    return subId.toUpperCase();
+  };
+
+  const getTransactionType = (category) => {
+    if (positiveCategories.includes(category)) return 'income';
+    if (neutralCategories.includes(category))  return 'neutral';
+    return 'expense';
   };
 
   const handleInscribe = async (e) => {
     e.preventDefault();
-
     if (!formData.description || !formData.amount || Number(formData.amount) <= 0) {
       setSkullState(prev => ({ ...prev, status: 'error' }));
       setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
       return;
     }
+    if (formData.isReimbursable && !formData.reimbursementTag.trim()) {
+      setSkullState(prev => ({ ...prev, status: 'error' }));
+      setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
+      return;
+    }
 
-    let actType = 'Bank';
-    if (formData.method === 'Cash') actType = 'Cash';
-    else if (cards.find(c => c.name === formData.method || c.id === formData.method)) actType = 'Card';
 
-    const newTitheId = isEditing || `${formData.date}T${new Date().toISOString().split('T')[1]}Z`;
-    const rawAmt = Number(formData.amount);
-    const isIncomeCategory = positiveCategories.includes(formData.category);
-    const signedAmount = isIncomeCategory ? Math.abs(rawAmt) : -Math.abs(rawAmt);
+    const subId       = formData.method || accounts[0]?._id?.split(':').pop() || 'bank_hdfc';
+    const actType     = resolveAccountType(subId);
+    const rawAmt      = Number(formData.amount);
+    const isIncome    = positiveCategories.includes(formData.category);
+    const signedAmt   = isIncome ? Math.abs(rawAmt) : -Math.abs(rawAmt);
+    const suffix      = Math.random().toString(36).substring(2, 10);
+    const txnId       = isEditing || `txn:${user}:${formData.date}:${suffix}`;
 
-    const newTithe = {
-      _id: newTitheId,
-      type: 'transaction',
-      user_id: user || 'Athang',
-      date: formData.date,
-      amount: signedAmount,
-      description: formData.description,
-      category: formData.category,
-      account_type: actType,
-      sub_account: formData.method,
-      is_reimbursable: formData.isReimbursable
+    const newTxn = {
+      _id:               txnId,
+      type:              'transaction',
+      user_id:           user,
+      date:              formData.date,
+      amount:            signedAmt,
+      description:       formData.description,
+      category:          formData.category,
+      account_type:      actType,
+      sub_account:       subId,
+      reimbursement_tag: formData.isReimbursable
+                           ? (formData.reimbursementTag.trim() || 'untagged')
+                           : null,
+      notes:             formData.notes.trim() || null,
+      created_at:        new Date().toISOString(),
     };
 
     if (dbTransactions) {
-      if (isEditing) {
-        try {
+      try {
+        if (isEditing) {
           const existing = await dbTransactions.get(isEditing);
-          await dbTransactions.put({ ...existing, ...newTithe });
-        } catch (err) {
-          console.error("Update failed:", err);
+          await dbTransactions.put({ ...existing, ...newTxn, _rev: existing._rev });
+        } else {
+          await dbTransactions.put(newTxn);
         }
-      } else {
-        await dbTransactions.put(newTithe);
+        setLastAddedId(txnId);
+      } catch (err) {
+        console.error('◈ INSCRIBE FAILED:', err);
+        setSkullState(prev => ({ ...prev, status: 'error' }));
+        setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 800);
+        return;
       }
     }
 
-    setLastAddedId(newTitheId);
-
-    setFormData({
-      ...formData,
-      description: '',
-      amount: '',
-      isReimbursable: false,
-      category: 'Uncategorized'
-    });
+    setFormData(prev => ({ ...blankForm, date: prev.date, method: prev.method }));
     setIsEditing(null);
   };
 
   const handleEdit = (tx) => {
+    const subId = (() => {
+      const raw = tx.sub_account;
+      if (!raw) return formData.method;
+      if (raw === 'cash_main') return raw;
+      if (accounts.find(a => a._id?.split(':').pop() === raw)) return raw;
+      if (cards.find(c => c._id?.split(':').pop() === raw)) return raw;
+      const acc = accounts.find(a => a.name === raw);
+      if (acc) return acc._id?.split(':').pop() || raw;
+      const card = cards.find(c => c.name === raw);
+      if (card) return card._id?.split(':').pop() || raw;
+      return formData.method;
+    })();
+
     setFormData({
-      date: tx.date || tx._id.split('T')[0],
-      description: tx.description || '',
-      amount: Math.abs(tx.amount || 0).toString(),
-      method: tx.sub_account || tx.account_type || 'Bank',
-      category: tx.category || 'Uncategorized',
-      isReimbursable: tx.is_reimbursable || false
+      date:             tx.date || new Date().toISOString().split('T')[0],
+      description:      tx.description || '',
+      amount:           Math.abs(tx.amount || 0).toString(),
+      method:           subId,
+      category:         tx.category || 'Uncategorized',
+      isReimbursable:   !!(tx.reimbursement_tag || tx.is_reimbursable),
+      reimbursementTag: (tx.reimbursement_tag && tx.reimbursement_tag !== 'untagged')
+                          ? tx.reimbursement_tag : '',
+      notes:            tx.notes || '',
     });
     setIsEditing(tx._id);
   };
@@ -359,73 +383,50 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       try {
         const doc = await dbTransactions.get(id);
         await dbTransactions.remove(doc);
-      } catch (err) {
-        console.error("Purge failed:", err);
-      }
+      } catch (err) { console.error('◈ PURGE FAILED:', err); }
     }
   };
 
-  const resolveMethodName = (tx) => {
-    const rawId = tx.sub_account || tx.account_type;
-    const cardMatch = cards.find(c => c.id === rawId || c.name === rawId);
-    if (cardMatch) return cardMatch.name;
-    const accMatch = accounts.find(a => a.id === rawId || a.name === rawId);
-    if (accMatch) return accMatch.name;
-    return rawId || 'BANK';
-  };
-
-  const getTransactionType = (category) => {
-    if (positiveCategories.includes(category)) return 'income';
-    if (neutralCategories.includes(category)) return 'neutral';
-    return 'expense';
-  };
-
   return (
-    <div className="slide-container active" ref={slideRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '15px', position: 'relative' }}>
-      
-      {/* ── Servo Skull Injection ── */}
+    <div
+      className="slide-container active"
+      ref={slideRef}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '15px', position: 'relative' }}
+    >
       <LedgerServoSkull x={skullState.x} y={skullState.y} status={skullState.status} />
 
       <style>{`
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type="number"] { -moz-appearance: textfield; }
-
         .mech-input, .mech-select { border-left: 2px solid var(--border); }
         .mech-input:focus, .mech-select:focus {
           border-left: 3px solid var(--ba-crimson) !important;
           border-color: var(--border-hi) !important;
         }
-
-        .mech-select optgroup { background: #000 !important; color: var(--text-d) !important; font-family: var(--mono); padding: 5px; }
-        .mech-select option { background: #000 !important; color: var(--border-hi) !important; font-family: var(--mono); padding: 8px; }
-
-        .ledger-scroll::-webkit-scrollbar { width: 4px; }
-        .ledger-scroll::-webkit-scrollbar-track { background: #050000; border-left: 1px solid var(--ba-border-lo); }
+        .mech-select optgroup { background: #000 !important; color: var(--text-d) !important; font-family: var(--mono); }
+        .mech-select option   { background: #000 !important; color: var(--border-hi) !important; font-family: var(--mono); }
+        .ledger-scroll::-webkit-scrollbar       { width: 4px; }
+        .ledger-scroll::-webkit-scrollbar-track { background: #050000; }
         .ledger-scroll::-webkit-scrollbar-thumb { background: rgba(204,34,0,0.5); border-radius: 2px; }
-        .ledger-scroll::-webkit-scrollbar-thumb:hover { background: var(--ba-crimson); }
-
         @keyframes skullShake {
-          0%, 100% { transform: translate(0, 0) rotate(0deg); }
-          25% { transform: translate(-4px, 0) rotate(-5deg); }
-          50% { transform: translate(4px, 0) rotate(5deg); }
-          75% { transform: translate(-4px, 0) rotate(-5deg); }
+          0%,100% { transform: translate(0,0) rotate(0deg); }
+          25%     { transform: translate(-4px,0) rotate(-5deg); }
+          50%     { transform: translate(4px,0) rotate(5deg); }
+          75%     { transform: translate(-4px,0) rotate(-5deg); }
         }
         .skull-shake { animation: skullShake 0.4s ease-in-out; }
-
         @keyframes typingPulse {
-          0%, 100% { transform: scaleX(0.9); opacity: 0.6; }
-          50% { transform: scaleX(1.1); opacity: 1; }
+          0%,100% { transform: scaleX(0.9); opacity: 0.6; }
+          50%     { transform: scaleX(1.1); opacity: 1; }
         }
         .typing-laser { animation: typingPulse 0.4s ease-in-out infinite; }
-
         @keyframes laserSweep {
-          0% { height: 0; opacity: 1; }
-          50% { height: 60px; opacity: 1; }
+          0%   { height: 0; opacity: 1; }
+          50%  { height: 60px; opacity: 1; }
           100% { height: 0; opacity: 0; transform: translateY(60px); }
         }
         .laser-sweep { animation: laserSweep 2s ease-in-out forwards; }
-
         @keyframes dataAssimilate {
           0%   { opacity: 0; transform: translateY(-8px) scale(0.98); filter: brightness(2); }
           100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
@@ -435,16 +436,14 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
           50%  { box-shadow: inset 0 0 0 1px var(--ba-gold), inset 0 0 30px rgba(201,168,76,0.4); background: rgba(201,168,76,0.15); }
           100% { box-shadow: inset 0 0 0 1px var(--ba-crimson), inset 0 0 20px rgba(204,34,0,0.5); background: rgba(204,34,0,0.15); }
         }
-
         .ledger-row {
           animation: dataAssimilate 0.4s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
           transition: background 0.2s ease, box-shadow 0.2s ease;
         }
         .target-locked { animation: targetLockPulse 1s ease-in-out infinite !important; }
-
         .ledger-row:hover:not(.target-locked) {
-          background: rgba(200, 34, 0, 0.08);
-          box-shadow: inset 0 0 15px rgba(200, 34, 0, 0.15);
+          background: rgba(200,34,0,0.08);
+          box-shadow: inset 0 0 15px rgba(200,34,0,0.15);
         }
         .ledger-row td:first-child, .ledger-row td:last-child { position: relative; }
         .ledger-row:hover td:first-child::before, .target-locked td:first-child::before {
@@ -455,23 +454,30 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
           content: ''; position: absolute; bottom: 4px; right: 4px;
           width: 6px; height: 6px; border-bottom: 1px solid #cc2200; border-right: 1px solid #cc2200;
         }
+        @keyframes fadeSlideIn {
+          from { opacity: 0; transform: translateY(-6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .reimb-tag-row { animation: fadeSlideIn 0.25s ease forwards; }
       `}</style>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '15px', flex: 1, minHeight: 0 }}>
-        
-        {/* ── LEFT COLUMN: Form ── */}
+
+        {/* ── LEFT: Form ── */}
         <div className="panel mech-panel" style={{ display: 'flex', flexDirection: 'column', padding: '20px', overflowY: 'auto' }}>
           <div className="sec-ttl" style={{ marginBottom: '20px', color: isEditing ? 'var(--amber)' : 'var(--text-d)' }}>
             {isEditing ? 'RECALIBRATE TITHE · EDIT ENTRY' : 'INSCRIBE TITHE · LOG ENTRY'}
           </div>
 
           <form onSubmit={handleInscribe} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', flex: 1, alignContent: 'start' }}>
-            
+
             <div style={{ position: 'relative' }}>
               <label className="kpi-lbl">IDENTIFIER · DESCRIPTION</label>
               <input
                 type="text" name="description" value={formData.description}
-                onChange={handleInputChange} onFocus={(e) => handleFocus(e, 'desc')} onBlur={handleDescriptionBlur}
+                onChange={handleInputChange}
+                onFocus={(e) => handleFocus(e, 'desc')}
+                onBlur={handleDescriptionBlur}
                 className="mech-input" required autoComplete="off"
               />
               <CryptoPlaceholder text="AWAITING DESIGNATION..." active={!formData.description && !isDescFocused} />
@@ -479,48 +485,62 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
 
             <div style={{ position: 'relative' }}>
               <label className="kpi-lbl">QUANTITY</label>
-              <input 
-                type="number" name="amount" value={formData.amount} 
-                onChange={handleInputChange} onFocus={(e) => handleFocus(e, 'amt')} onBlur={(e) => handleBlur(e, 'amt')}
-                className="mech-input" required min="0" step="0.01" 
+              <input
+                type="number" name="amount" value={formData.amount}
+                onChange={handleInputChange}
+                onFocus={(e) => handleFocus(e, 'amt')}
+                onBlur={(e) => handleBlur(e, 'amt')}
+                className="mech-input" required min="0" step="0.01"
               />
               <CryptoPlaceholder text="0.00" active={!formData.amount && !isAmtFocused} />
             </div>
 
             <div>
               <label className="kpi-lbl">TEMPORAL STAMP</label>
-              <input 
-                type="date" name="date" value={formData.date} onChange={handleInputChange} className="mech-input" required 
-                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')} onBlur={() => aimSkull(null)}
+              <input
+                type="date" name="date" value={formData.date}
+                onChange={handleInputChange} className="mech-input" required
+                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                onBlur={() => aimSkull(null)}
               />
             </div>
 
             <div>
               <label className="kpi-lbl">TRANSACTION METHOD</label>
-              <select 
-                name="method" value={formData.method} onChange={handleInputChange} className="mech-select"
-                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')} onBlur={() => aimSkull(null)}
+              <select
+                name="method" value={formData.method}
+                onChange={handleInputChange} className="mech-select"
+                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                onBlur={() => aimSkull(null)}
               >
                 <optgroup label="BANK ACCOUNTS">
-                  {accounts.map(acc => <option key={acc.id} value={acc.name}>{acc.name}</option>)}
+                  {accounts.map(acc => {
+                    const subId = acc._id?.split(':').pop() || acc._id;
+                    return <option key={acc._id} value={subId}>{acc.name}</option>;
+                  })}
                 </optgroup>
-                <optgroup label="CREDIT CARDS">
-                  {cards.map(card => <option key={card.id} value={card.name}>{card.name}</option>)}
+                <optgroup label="CREDIT LINES">
+                  {cards.map(card => {
+                    const subId = card._id?.split(':').pop() || card._id;
+                    return <option key={card._id} value={subId}>{card.name}</option>;
+                  })}
                 </optgroup>
                 <optgroup label="PHYSICAL RESERVE">
-                  <option value="Cash">CASH RESERVE</option>
+                  <option value="cash_main">CASH RESERVE</option>
                 </optgroup>
               </select>
             </div>
 
             <div>
               <label className="kpi-lbl">CLASSIFICATION</label>
-              <select 
-                name="category" value={formData.category} onChange={handleInputChange} className="mech-select"
-                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')} onBlur={() => aimSkull(null)}
+              <select
+                name="category" value={formData.category}
+                onChange={handleInputChange} className="mech-select"
+                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                onBlur={() => aimSkull(null)}
               >
                 <option value="Uncategorized">-- AWAITING CLASSIFICATION --</option>
-                {Array.from(new Set([...categories, formData.category]))
+                {Array.from(new Set([...allCategories, formData.category]))
                   .filter(cat => cat && cat !== 'Uncategorized')
                   .sort()
                   .map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -529,47 +549,83 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <label className="kpi-lbl">RECOVERY DIRECTIVE</label>
-              <div 
+              <div
                 style={{ display: 'flex', gap: '6px', marginTop: '5px', flex: 1 }}
                 onMouseEnter={(e) => aimSkull(e.currentTarget, 30, 0, 'focus')}
                 onMouseLeave={() => aimSkull(null)}
               >
                 <button
-                  type="button" onClick={() => setFormData({ ...formData, isReimbursable: false })}
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, isReimbursable: false, reimbursementTag: '' }))}
                   style={{
                     flex: 1, padding: '10px 4px', fontFamily: 'var(--mono)', fontSize: '10px', cursor: 'pointer',
                     background: !formData.isReimbursable ? 'rgba(204,34,0,0.15)' : 'rgba(2,8,4,0.7)',
                     color: !formData.isReimbursable ? '#fff' : 'var(--ba-gold-mute)',
                     border: '1px solid', borderColor: !formData.isReimbursable ? 'var(--ba-crimson)' : 'var(--ba-border-lo)',
-                    boxShadow: !formData.isReimbursable ? 'inset 0 0 10px rgba(204,34,0,0.2)' : 'none', transition: 'all 0.2s', letterSpacing: '1px'
+                    boxShadow: !formData.isReimbursable ? 'inset 0 0 10px rgba(204,34,0,0.2)' : 'none',
+                    transition: 'all 0.2s', letterSpacing: '1px'
                   }}
-                >
-                  [ PERSONAL ]
-                </button>
+                >[ PERSONAL ]</button>
                 <button
-                  type="button" onClick={() => setFormData({ ...formData, isReimbursable: true })}
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, isReimbursable: true }))}
                   style={{
                     flex: 1, padding: '10px 4px', fontFamily: 'var(--mono)', fontSize: '10px', cursor: 'pointer',
                     background: formData.isReimbursable ? 'rgba(74,222,128,0.15)' : 'rgba(2,8,4,0.7)',
                     color: formData.isReimbursable ? '#fff' : 'var(--ba-gold-mute)',
                     border: '1px solid', borderColor: formData.isReimbursable ? 'var(--border-hi)' : 'var(--ba-border-lo)',
-                    boxShadow: formData.isReimbursable ? 'inset 0 0 10px rgba(74,222,128,0.2)' : 'none', transition: 'all 0.2s', letterSpacing: '1px'
+                    boxShadow: formData.isReimbursable ? 'inset 0 0 10px rgba(74,222,128,0.2)' : 'none',
+                    transition: 'all 0.2s', letterSpacing: '1px'
                   }}
-                >
-                  [ RECOVERY ]
-                </button>
+                >[ RECOVERY ]</button>
               </div>
+            </div>
+
+            {formData.isReimbursable && (
+              <div className="reimb-tag-row" style={{ gridColumn: '1 / -1' }}>
+                <label className="kpi-lbl">RECOVERY TARGET // WHO OWES YOU</label>
+                <input
+                  type="text" name="reimbursementTag" value={formData.reimbursementTag}
+                  onChange={handleInputChange}
+                  placeholder="e.g. Rahul, Work Expense..."
+                  className="mech-input"
+                  list="ar-tags-datalist"
+                  required
+                  onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                  onBlur={() => aimSkull(null)}
+                  style={!formData.reimbursementTag.trim() ? { borderColor: 'var(--ba-crimson)', boxShadow: 'inset 0 0 8px rgba(204,34,0,0.2)' } : {}}
+                />
+                <datalist id="ar-tags-datalist">
+                  {existingTags.map(tag => <option key={tag} value={tag} />)}
+                </datalist>
+              </div>
+            )}
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="kpi-lbl">FIELD NOTES // OPTIONAL</label>
+              <input
+                type="text" name="notes" value={formData.notes}
+                onChange={handleInputChange}
+                placeholder="Additional context..."
+                className="mech-input"
+                onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                onBlur={() => aimSkull(null)}
+              />
             </div>
 
             <div style={{ gridColumn: '1 / -1', marginTop: 'auto', paddingTop: '10px' }}>
               {isEditing && (
-                <button type="button" className="mech-btn" style={{ marginBottom: '10px', background: 'transparent', color: 'var(--text-d)' }} onClick={() => setIsEditing(null)}>
-                  ABORT EDIT
-                </button>
+                <button
+                  type="button" className="mech-btn"
+                  style={{ marginBottom: '10px', background: 'transparent', color: 'var(--text-d)' }}
+                  onClick={() => { setIsEditing(null); setFormData(blankForm); }}
+                >ABORT EDIT</button>
               )}
-              <button 
-                type="submit" className="mech-btn" style={{ margin: 0, borderColor: isEditing ? 'var(--amber)' : 'var(--border-hi)' }}
-                onMouseEnter={(e) => aimSkull(e.target, 30, -10, 'idle')} onMouseLeave={() => aimSkull(null)}
+              <button
+                type="submit" className="mech-btn"
+                style={{ margin: 0, borderColor: isEditing ? 'var(--amber)' : 'var(--border-hi)' }}
+                onMouseEnter={(e) => aimSkull(e.target, 30, -10, 'idle')}
+                onMouseLeave={() => aimSkull(null)}
               >
                 {isEditing ? 'COMMIT MODIFICATION' : 'AUTHORIZE & INSCRIBE'}
               </button>
@@ -577,7 +633,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
           </form>
         </div>
 
-        {/* ── RIGHT COLUMN: Ledger Table ── */}
+        {/* ── RIGHT: Ledger Table ── */}
         <div className="panel mech-panel" style={{ display: 'flex', flexDirection: 'column', padding: '20px', overflow: 'hidden' }}>
           <div className="sec-ttl" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <span>ARCHIVAL LEDGER · {user?.toUpperCase()}</span>
@@ -600,17 +656,17 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
               <tbody>
                 {transactions.length > 0 ? (
                   transactions.map((tx, index) => {
-                    const txType = getTransactionType(tx.category);
-                    const isTargetLocked = tx._id === lastAddedId;
+                    const txType    = getTransactionType(tx.category);
+                    const isLocked  = tx._id === lastAddedId;
                     const animDelay = `${Math.min(index * 0.05, 0.5)}s`;
-
                     return (
-                      <tr 
-                        key={tx._id} ref={isTargetLocked ? rowRef : null}
-                        className={`ledger-row ${isTargetLocked ? 'target-locked' : ''}`}
-                        style={{ animationDelay: isTargetLocked ? '0s' : animDelay }}
+                      <tr
+                        key={tx._id}
+                        ref={isLocked ? rowRef : null}
+                        className={`ledger-row ${isLocked ? 'target-locked' : ''}`}
+                        style={{ animationDelay: isLocked ? '0s' : animDelay }}
                       >
-                        <td style={{ color: 'var(--text-d)', fontSize: '11px', fontFamily: 'var(--mono)', verticalAlign: 'top', paddingTop: '12px' }}>
+                        <td style={{ color: 'var(--text-d)', fontSize: '11px', verticalAlign: 'top', paddingTop: '12px' }}>
                           {tx.date}
                         </td>
                         <td style={{ verticalAlign: 'top', paddingTop: '12px' }}>
@@ -618,11 +674,21 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                             {tx.description || 'UNKNOWN'}
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-d)' }}>
-                            {tx.category} {tx.is_reimbursable && <span style={{ color: 'var(--border-hi)', marginLeft: '5px' }}>[R]</span>}
+                            {tx.category}
+                            {tx.reimbursement_tag && (
+                              <span style={{ color: 'var(--border-hi)', marginLeft: '6px' }}>
+                                [R: {tx.reimbursement_tag}]
+                              </span>
+                            )}
+                            {tx.notes && (
+                              <span style={{ color: 'var(--ba-gold-mute)', marginLeft: '6px' }}>
+                                // {tx.notes}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td style={{ fontSize: '10px', color: 'var(--text-d)', textTransform: 'uppercase', verticalAlign: 'top', paddingTop: '12px' }}>
-                          {resolveMethodName(tx)}
+                          {resolveMethodLabel(tx.sub_account)}
                         </td>
                         <td
                           className={txType === 'income' ? 'ok' : txType === 'neutral' ? '' : 'warn'}
@@ -632,25 +698,28 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                         </td>
                         <td style={{ textAlign: 'right', verticalAlign: 'top', paddingTop: '10px' }}>
                           <button className="action-btn" onClick={() => handleEdit(tx)}>EDIT</button>
-                          <button 
-                            className="action-btn del" onClick={() => handleDelete(tx._id)}
-                            onMouseEnter={(e) => aimSkull(e.target, -70, -10, 'delete')} onMouseLeave={() => aimSkull(null)}
-                          >
-                            DEL
-                          </button>
+                          <button
+                            className="action-btn del"
+                            onClick={() => handleDelete(tx._id)}
+                            onMouseEnter={(e) => aimSkull(e.target, -70, -10, 'delete')}
+                            onMouseLeave={() => aimSkull(null)}
+                          >DEL</button>
                         </td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}><span className="blink">AWAITING DATA STREAM...</span></td>
+                    <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>
+                      <span className="blink">AWAITING DATA STREAM...</span>
+                    </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
+
       </div>
     </div>
   );

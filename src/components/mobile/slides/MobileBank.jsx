@@ -58,12 +58,6 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
   // ─────────────────────────────────────────────
   // DATA LOADING
   // ─────────────────────────────────────────────
-  // FIX: loadData now reads from the `data` prop supplied by useFinanceData
-  // instead of re-fetching from the engines directly. The hook already runs
-  // getBankAccountBalances + getAccounts on every sync change, so we just
-  // consume its output. Adding data?.liveBalances / data?.accounts as deps
-  // means this callback gets a new identity — and the effect below re-fires —
-  // whenever the hook pushes fresh numbers.
   const loadData = React.useCallback(() => {
     const accs    = data?.accounts    ?? [];
     const balData = data?.liveBalances ?? { accounts: [], total: 0 };
@@ -73,9 +67,9 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
 
     setSelectedAccount(prev => {
       if (!prev) return null;
-      return accs.find(a => a.id === prev.id) || prev;
+      return accs.find(a => a._id === prev._id) || prev;
     });
-  }, [data?.accounts, data?.liveBalances]); // ← key fix: react to hook output
+  }, [data?.accounts, data?.liveBalances]);
 
   // Re-run whenever the hook delivers new data
   useEffect(() => {
@@ -91,7 +85,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
       if (!selectedAccount || !dbTransactions) return;
       const result      = await dbTransactions.allDocs({ include_docs: true });
       const accountName = selectedAccount.name.toLowerCase();
-      const accountId   = selectedAccount.id.toLowerCase();
+      const accountId   = (selectedAccount._id || '').split(':').pop().toLowerCase();
 
       const txns = result.rows
         .map(r => r.doc)
@@ -108,8 +102,6 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
       setRecentTxns(txns);
     };
     load();
-    // FIX: depend on data?.transactions so recent txns refresh when the hook
-    // delivers new transaction data (no separate PouchDB listener needed here).
   }, [selectedAccount, dbTransactions, userId, data?.transactions]);
 
   const handleSelectAccount = (account) => {
@@ -132,7 +124,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
     setIsAdding(true);
     const result = await AccountEngine.addAccount(form, dbMetadata, userId);
     if (result.ok) {
-      await AccountEngine.updateAccount(result.account.id, {
+      await AccountEngine.updateAccount(result.account._id, {
         minimum_balance:   Number(form.minimum_balance) || 0,
         last_audited_date: new Date().toISOString()
       }, dbMetadata, userId);
@@ -148,10 +140,10 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const handleDeleteAccount = async () => {
     if (!deleteConfirm || !dbMetadata) return;
-    const result = await AccountEngine.deleteAccount(deleteConfirm.id, dbMetadata, userId);
+    const result = await AccountEngine.deleteAccount(deleteConfirm._id, dbMetadata, userId);
     if (result.ok) {
       showStatus('success', `Uplink severed: ${deleteConfirm.name}`);
-      if (selectedAccount?.id === deleteConfirm.id) {
+      if (selectedAccount?._id === deleteConfirm._id) {
         setSelectedAccount(null);
         setView(VIEW_LIST);
       }
@@ -197,7 +189,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const completeAuditRitual = async () => {
     if (!selectedAccount) return;
-    await AccountEngine.updateAccount(selectedAccount.id, {
+    await AccountEngine.updateAccount(selectedAccount._id, {
       last_audited_date: new Date().toISOString()
     }, dbMetadata, userId);
     setAuditProgress(0);
@@ -209,7 +201,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
   // RENDER CALCULATIONS
   // ─────────────────────────────────────────────
   const activeBalance = balances.accounts.find(
-    b => b.account.id === selectedAccount?.id
+    b => b.account._id === selectedAccount?._id
   )?.balance || 0;
 
   const minBalance       = selectedAccount?.minimum_balance || 0;
@@ -750,7 +742,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
               const isWarning = balance < accMin;
               return (
                 <div
-                  key={account.id}
+                  key={account._id}
                   className={`mb-acc-row mb-bracketed ${isWarning ? 'warning' : ''}`}
                   onClick={() => handleSelectAccount(account)}
                 >

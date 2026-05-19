@@ -132,6 +132,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const [auditProgress, setAuditProgress] = useState(0);
   const [isAuditing,    setIsAuditing]    = useState(false);
+  const [sealStamped,   setSealStamped]   = useState(false);
   const auditTimerRef = useRef(null);
 
   const formatAmount = (amt) => `₹ ${Math.abs(amt || 0).toLocaleString()}`;
@@ -155,7 +156,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
     setSelectedAccount((prev) => {
       if (prev) {
-        const freshAcc = accs.find(a => a.id === prev.id);
+        const freshAcc = accs.find(a => a._id === prev._id);
         return freshAcc || prev;
       }
       return accs.length > 0 ? accs[0] : null;
@@ -179,7 +180,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
       const result = await dbTransactions.allDocs({ include_docs: true });
       const accountName = selectedAccount.name.toLowerCase();
-      const accountId = selectedAccount.id.toLowerCase();
+      const accountId   = (selectedAccount._id || '').split(':').pop().toLowerCase();
 
       const txns = result.rows
         .map(r => r.doc)
@@ -217,7 +218,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
     const result = await AccountEngine.addAccount(form, dbMetadata, userId);
     if (result.ok) {
-      await AccountEngine.updateAccount(result.account.id, {
+      await AccountEngine.updateAccount(result.account._id, {
         minimum_balance: Number(form.minimum_balance) || 0,
         last_audited_date: new Date().toISOString()
       }, dbMetadata, userId);
@@ -235,10 +236,10 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
   const handleDeleteAccount = async () => {
     if (!deleteConfirm || !dbMetadata) return;
 
-    const result = await AccountEngine.deleteAccount(deleteConfirm.id, dbMetadata, userId);
+    const result = await AccountEngine.deleteAccount(deleteConfirm._id, dbMetadata, userId);
     if (result.ok) {
       setStatusMsg({ type: 'success', text: `Account "${deleteConfirm.name}" deleted` });
-      if (selectedAccount?.id === deleteConfirm.id) setSelectedAccount(null);
+      if (selectedAccount?._id === deleteConfirm._id) setSelectedAccount(null);
       setDeleteConfirm(null);
       await loadData();
     } else {
@@ -273,17 +274,19 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const completeAuditRitual = async () => {
     if (!selectedAccount) return;
-    await AccountEngine.updateAccount(selectedAccount.id, {
+    await AccountEngine.updateAccount(selectedAccount._id, {
       last_audited_date: new Date().toISOString()
     }, dbMetadata, userId);
 
     setAuditProgress(0);
     setIsAuditing(false);
+    setSealStamped(true);
+    setTimeout(() => setSealStamped(false), 2800);
     loadData();
   };
 
   // ==================== RENDER CALCULATIONS ====================
-  const activeBalance = balances.accounts.find(b => b.account.id === selectedAccount?.id)?.balance || 0;
+  const activeBalance = balances.accounts.find(b => b.account._id === selectedAccount?._id)?.balance || 0;
   const minBalance = selectedAccount?.minimum_balance || 0;
   const isBalanceCritical = activeBalance < minBalance;
 
@@ -377,6 +380,60 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
           background: rgba(201,168,76,0.3); z-index: 0; transition: width 0.1s linear;
         }
         .rite-content { position: relative; z-index: 1; }
+
+        /* Purity Seal */
+      @keyframes sealStamp {
+        0% {
+          transform: translateY(-40px) scale(1.5);
+          opacity: 0;
+          filter: brightness(4) saturate(0);
+        }
+        18% {
+          transform: translateY(4px) scale(1);
+          opacity: 1;
+          filter: brightness(2) saturate(1.4) contrast(1.2);
+        }
+        28% {
+          transform: translateY(0) scale(1.03);
+          opacity: 1;
+          filter: brightness(1.3) saturate(1.2) contrast(1.1);
+        }
+        70% {
+          transform: translateY(0) scale(1.03);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(4px) scale(1);
+          opacity: 0.5s;
+          filter: brightness(1) contrast(1.05);
+        }
+      }
+
+      .seal-stamp {
+        animation: sealStamp 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        mix-blend-mode: screen;
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+      }
+
+      @keyframes sealPulse {
+        0%, 100% { opacity: 0.5; }
+        50%      { opacity: 0.7; }
+      }
+
+      .seal-watermark-pure {
+        animation: sealPulse 6s ease-in-out infinite;
+        opacity: 0.5;
+      }
+
+      .seal-watermark-restless {
+        opacity: 0.7;
+        filter: sepia(1) saturate(2) hue-rotate(-10deg) brightness(1.15) contrast(1.1);
+      }
+
+      .seal-watermark-corrupt {
+        opacity: 0.10;
+        filter: sepia(1) saturate(1.2) grayscale(0.6) brightness(1.1) contrast(1.1);
+      }
       `}</style>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1.85fr', gap: '20px', flex: 1, minHeight: 0 }}>
@@ -388,13 +445,13 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
           <div style={{ flex: 1, overflowY: 'auto', paddingRight: '5px' }}>
             {balances.accounts.length > 0 ? (
               balances.accounts.map(({ account, balance }) => {
-                const isSelected = selectedAccount?.id === account.id;
+                const isSelected = selectedAccount?._id === account._id;
                 const accMin = account.minimum_balance || 0;
                 const isWarning = balance < accMin;
 
                 return (
                   <div
-                    key={account.id}
+                    key={account._id}
                     className={`acc-row ${isSelected ? 'target-locked' : ''}`}
                     style={{
                       padding: '12px 15px',
@@ -453,10 +510,32 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
         {/* ── RIGHT COLUMN: Noosphere Uplink & Detail ── */}
         <div className="panel mech-panel" style={{ padding: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {selectedAccount ? (
-            <div key={selectedAccount.id} className="assimilate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div key={selectedAccount._id} className="assimilate-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+
+              {/* Purity Seal — watermark, fades with audit state */}
+              <div
+                className={`seal-watermark-${auditState}`}
+                style={{
+                  position: 'absolute', top: 0, right: 0, width: '110px', height: '100%',
+                  backgroundImage: "url('/purity_seal.jpg')",
+                  backgroundRepeat: 'no-repeat', backgroundPosition: 'top right',
+                  backgroundSize: 'contain', pointerEvents: 'none', zIndex: 0,
+                }}
+              />
+
+              {/* Stamp effect on ritual completion */}
+              {sealStamped && (
+                <div className="seal-stamp" style={{
+                  position: 'absolute', top: '50%', left: '50%',
+                  transform: 'translate(-50%, -60%)',
+                  width: '180px', height: 'auto', zIndex: 50, pointerEvents: 'none',
+                }}>
+                  <img src="/purity_seal.jpg" alt="" style={{ width: '100%', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(201,168,76,0.8))' }} />
+                </div>
+              )}
 
               {/* Header & Balance */}
-              <div style={{ flexShrink: 0, paddingBottom: '15px' }}>
+              <div style={{ flexShrink: 0, paddingBottom: '15px', position: 'relative', zIndex: 1 }}>
                 <div className="sec-ttl" style={{ border: 'none', margin: 0, padding: 0 }}>
                   NOOSPHERE UPLINK · {selectedAccount.name.toUpperCase()}
                 </div>

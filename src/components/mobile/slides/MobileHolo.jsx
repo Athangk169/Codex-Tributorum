@@ -103,7 +103,7 @@ const MobileHolo = ({ data, db, userId }) => {
     }
   }, [db, userId]);
 
-  useEffect(() => { loadRules(); }, [loadRules, userId]);
+  useEffect(() => { loadRules(); }, [loadRules, userId, data]);
 
   // Lore ticker
   useEffect(() => {

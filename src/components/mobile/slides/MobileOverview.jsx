@@ -5,17 +5,55 @@ import ScrambleText from '../../shared/ScrambleText';
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVO SKULL 3D VIEWER  (ported 1:1 from OverviewSlide, mobile sizing)
 // ─────────────────────────────────────────────────────────────────────────────
-const ServoSkullViewer = ({ syncLed, auditState }) => {
+const ServoSkullViewer = ({ syncLed, auditState, slideRef, dockRef }) => {
   const containerRef = useRef(null);
   const mvRef        = useRef(null);
+  const activeTargetRef = useRef(null);
+  const [skullMode, setSkullMode] = useState('dock');
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [beamSide, setBeamSide] = useState('left');
+
+  const moveToElement = useCallback((element, mode = 'scan') => {
+    if (!element || !slideRef.current) return;
+    const slideRect = slideRef.current.getBoundingClientRect();
+    const elRect = element.getBoundingClientRect();
+    const scanFromRight = Math.random() > 0.5;
+    setBeamSide(scanFromRight ? 'left' : 'right');
+    const rawX = mode === 'dock'
+      ? elRect.left - slideRect.left
+      : scanFromRight
+        ? elRect.right - slideRect.left + 8
+        : elRect.left - slideRect.left - 72;
+    const rawY = mode === 'dock'
+      ? elRect.top - slideRect.top
+      : elRect.top - slideRect.top + Math.max(0, (elRect.height - 64) / 2);
+
+    activeTargetRef.current?.classList.remove('mo-skull-active');
+    if (mode === 'dock') {
+      activeTargetRef.current = null;
+    } else {
+      element.classList.add('mo-skull-active');
+      activeTargetRef.current = element;
+    }
+
+    setSkullMode(mode);
+    setPosition({
+      x: Math.max(2, Math.min(slideRect.width - 66, rawX)),
+      y: Math.max(2, Math.min(slideRect.height - 66, rawY)),
+    });
+  }, [slideRef]);
+
+  const moveToDock = useCallback(() => {
+    activeTargetRef.current?.classList.remove('mo-skull-active');
+    activeTargetRef.current = null;
+    moveToElement(dockRef.current, 'dock');
+  }, [dockRef, moveToElement]);
 
   useEffect(() => {
     import('@google/model-viewer');
 
     const mv = document.createElement('model-viewer');
     mv.setAttribute('src', '/servo-skull_warhammer.glb');
-    mv.setAttribute('auto-rotate', '');
-    mv.setAttribute('rotation-per-second', '20deg');
     mv.setAttribute('camera-orbit', '0deg 75deg 2.5m');
     mv.setAttribute('disable-zoom', '');
     mv.setAttribute('interaction-prompt', 'none');
@@ -44,14 +82,111 @@ const ServoSkullViewer = ({ syncLed, auditState }) => {
 
   useEffect(() => {
     if (!mvRef.current) return;
-    if (syncLed !== 'ok' || auditState === 'CORRUPTED') {
+    if (skullMode === 'scan' || skullMode === 'focus') {
+      mvRef.current.style.filter = 'sepia(1) saturate(6) hue-rotate(-28deg) brightness(1.25) drop-shadow(0 0 10px rgba(204,34,0,0.85))';
+    } else if (skullMode === 'glitch' || syncLed !== 'ok' || auditState === 'CORRUPTED') {
       mvRef.current.style.filter = 'sepia(1) saturate(5) hue-rotate(-30deg) brightness(0.65) drop-shadow(0 0 8px rgba(204,34,0,0.8))';
     } else if (auditState === 'RESTLESS') {
       mvRef.current.style.filter = 'sepia(1) saturate(3) hue-rotate(-10deg) brightness(0.8) drop-shadow(0 0 5px rgba(255,165,0,0.4))';
     } else {
       mvRef.current.style.filter = 'sepia(1) saturate(4) hue-rotate(85deg) brightness(0.75)';
     }
-  }, [syncLed, auditState]);
+  }, [syncLed, auditState, skullMode]);
+
+  useEffect(() => {
+    let t = 0;
+    const iv = setInterval(() => {
+      if (!mvRef.current) return;
+      t += 0.018;
+      let theta, phi;
+      switch (skullMode) {
+        case 'scan':
+          theta = (beamSide === 'right' ? -125 : 125) + Math.sin(t * 1.6) * 7;
+          phi = 76 + Math.sin(t * 1.2 + 0.9) * 4;
+          break;
+        case 'focus':
+          theta = (beamSide === 'right' ? -145 : 145) + Math.sin(t * 0.8) * 4;
+          phi = 74 + Math.sin(t * 0.5) * 2;
+          break;
+        case 'glitch':
+          theta = (Math.random() - 0.5) * 180;
+          phi = 55 + Math.random() * 50;
+          break;
+        default:
+          theta = Math.sin(t) * 38;
+          phi = 80 + Math.sin(t * 0.4 + 1.2) * 7;
+      }
+      mvRef.current.setAttribute('camera-orbit', `${theta}deg ${phi}deg 2.5m`);
+    }, 50);
+
+    return () => clearInterval(iv);
+  }, [beamSide, skullMode]);
+
+  useEffect(() => {
+    moveToDock();
+    const handleResize = () => moveToDock();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [moveToDock]);
+
+  useEffect(() => {
+    let timeoutId;
+    let cancelled = false;
+
+    const chooseNextAction = () => {
+      if (cancelled || !slideRef.current) return;
+      const targets = [...slideRef.current.querySelectorAll('.mo-panel, .mo-relay-row, .mo-ar-row')]
+        .filter(el => el !== dockRef.current && !el.contains(dockRef.current))
+        .filter(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+        });
+
+      if (!targets.length) {
+        moveToDock();
+        timeoutId = setTimeout(chooseNextAction, 5000);
+        return;
+      }
+
+      const scanCount = 2 + Math.floor(Math.random() * 2);
+      let step = 0;
+      const usedTargets = new Set();
+
+      const scanNextTarget = () => {
+        if (cancelled) return;
+        const visibleTargets = targets.filter(target => {
+          const rect = target.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < window.innerHeight;
+        });
+        const available = visibleTargets.filter(target => !usedTargets.has(target));
+        const pool = available.length > 0 ? available : visibleTargets.length > 0 ? visibleTargets : targets;
+        const target = pool[Math.floor(Math.random() * pool.length)];
+        usedTargets.add(target);
+        moveToElement(target, Math.random() < 0.1 ? 'glitch' : 'scan');
+        step += 1;
+
+        if (step < scanCount) {
+          timeoutId = setTimeout(scanNextTarget, 9800 + Math.random() * 2200);
+          return;
+        }
+
+        timeoutId = setTimeout(() => {
+          if (cancelled) return;
+          if (Math.random() < 0.72) moveToDock();
+          timeoutId = setTimeout(chooseNextAction, 9000 + Math.random() * 6000);
+        }, 9800 + Math.random() * 2600);
+      };
+
+      scanNextTarget();
+    };
+
+    timeoutId = setTimeout(chooseNextAction, 2200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      activeTargetRef.current?.classList.remove('mo-skull-active');
+    };
+  }, [dockRef, moveToDock, moveToElement, slideRef]);
 
   const badgeColor = auditState === 'CORRUPTED' ? '#cc2200'
     : syncLed === 'offline'     ? '#cc2200'
@@ -65,9 +200,19 @@ const ServoSkullViewer = ({ syncLed, auditState }) => {
     : 'PURE';
 
   return (
-    <div style={{ position: 'relative', width: '84px', height: '84px', flexShrink: 0 }}>
+    <div style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '64px',
+      height: '64px',
+      transform: `translate(${position.x}px, ${position.y}px)`,
+      transition: 'transform 7.5s cubic-bezier(0.16, 1, 0.3, 1)',
+      zIndex: 60,
+      pointerEvents: 'none',
+    }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', borderRadius: '2px' }} />
-      {/* Status badge pinned to bottom of skull */}
+      {(skullMode === 'scan' || skullMode === 'focus') && <div className={`mo-skull-laser ${beamSide === 'right' ? 'to-right' : 'to-left'}`} />}
       <div style={{
         position: 'absolute', bottom: '3px', left: 0, right: 0,
         display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 5,
@@ -79,7 +224,7 @@ const ServoSkullViewer = ({ syncLed, auditState }) => {
           color: badgeColor,
           textShadow: `0 0 6px ${badgeColor}99`,
         }}>
-          {badgeText}
+          {skullMode === 'scan' ? 'SCAN' : skullMode === 'focus' ? 'LOCK' : skullMode === 'glitch' ? 'ERR' : badgeText}
         </span>
       </div>
     </div>
@@ -147,6 +292,41 @@ const STYLES = `
     background: linear-gradient(90deg, transparent, #c9a84c22, #c9a84cbb, #c9a84c22, transparent);
     background-size: 200% 100%;
     animation: plasmaShimmer 5s linear infinite;
+  }
+  .mo-skull-active {
+    background: rgba(204,34,0,0.07) !important;
+    box-shadow: inset 0 0 18px rgba(204,34,0,0.2), 0 0 14px rgba(204,34,0,0.1) !important;
+  }
+  .mo-skull-dock {
+    width: 64px; height: 64px; position: relative; flex-shrink: 0;
+    border: 1px dashed rgba(74,222,128,0.22);
+    background: radial-gradient(circle, rgba(74,222,128,0.08), transparent 65%);
+    box-shadow: inset 0 0 12px rgba(0,0,0,0.9);
+  }
+  .mo-skull-dock::after {
+    content: ''; position: absolute; inset: 9px;
+    border: 1px solid rgba(201,168,76,0.26);
+    box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 10px rgba(74,222,128,0.08);
+  }
+  .mo-skull-laser {
+    position: absolute; top: 34px; width: 142px; height: 2px;
+    box-shadow: 0 0 10px 2px rgba(204,34,0,0.8);
+    z-index: -1;
+    animation: moLaserPulse 0.55s ease-in-out infinite alternate;
+  }
+  .mo-skull-laser.to-left {
+    right: 42px;
+    background: linear-gradient(270deg, #cc2200 0%, rgba(204,34,0,0) 100%);
+    transform-origin: right center;
+  }
+  .mo-skull-laser.to-right {
+    left: 42px;
+    background: linear-gradient(90deg, #cc2200 0%, rgba(204,34,0,0) 100%);
+    transform-origin: left center;
+  }
+  @keyframes moLaserPulse {
+    from { opacity: 0.55; filter: brightness(0.85); }
+    to   { opacity: 1; filter: brightness(1.35); }
   }
 
   /* ── Panel title ── */
@@ -295,6 +475,8 @@ const formatDateToText = (dateString) => {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function MobileOverview({ data, syncLed, dbTransactions, userId }) {
+  const slideRef = useRef(null);
+  const skullDockRef = useRef(null);
 
   // ── Data extraction (identical to OverviewSlide) ──
   const txns    = data?.transactions  || [];
@@ -407,7 +589,13 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
   return (
     <>
       <style>{STYLES}</style>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 14px 28px', fontFamily: 'var(--mono, monospace)', color: 'var(--text-d, #4ade80)' }}>
+      <div ref={slideRef} style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 14px 28px', fontFamily: 'var(--mono, monospace)', color: 'var(--text-d, #4ade80)', position: 'relative' }}>
+        <ServoSkullViewer
+          syncLed={syncLed}
+          auditState={globalAuditState}
+          slideRef={slideRef}
+          dockRef={skullDockRef}
+        />
 
         {/* ── 1. FUNDS AVAILABLE ── hero card ── */}
         <div className="mo-panel mo-cornered">
@@ -461,10 +649,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
           <div className="mo-ttl">SYSTEM UPLINK STATUS</div>
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
 
-            {/* The 3D skull */}
-            <div style={{ flexShrink: 0, border: '1px solid #2a0800', background: '#040101', boxShadow: 'inset 0 0 12px rgba(0,0,0,0.9)' }}>
-              <ServoSkullViewer syncLed={syncLed} auditState={globalAuditState} />
-            </div>
+            <div ref={skullDockRef} className="mo-skull-dock" />
 
             {/* Status rows */}
             <div style={{ flex: 1 }}>

@@ -31,6 +31,84 @@
 // ─────────────────────────────────────────────────────────────
 export const CategorizationEngine = {
 
+  obligationRules: [
+    {
+      category_name: 'Loan Drawdown',
+      keywords: [
+        'loan drawdown',
+        'loan disbursal',
+        'loan disbursement',
+        'loan disbursed',
+        'loan credited'
+      ]
+    },
+    {
+      category_name: 'Loan Payment',
+      keywords: [
+        'loan repayment',
+        'loan payment',
+        'loan emi',
+        'emi debit',
+        'emi repayment'
+      ]
+    },
+    {
+      category_name: 'EMI Payment',
+      keywords: [
+        'emi payment',
+        'consumer emi',
+        'card emi'
+      ]
+    }
+  ],
+
+  _slug(categoryName) {
+    return categoryName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  },
+
+  _defaultRuleId(userId, categoryName) {
+    return `finance:rule:${userId}:${this._slug(categoryName)}`;
+  },
+
+  async ensureObligationRules(metadataDB, userId) {
+    if (!metadataDB || !userId) return { ok: false };
+
+    try {
+      for (const rule of this.obligationRules) {
+        const ruleId = this._defaultRuleId(userId, rule.category_name);
+        try {
+          const existing = await metadataDB.get(ruleId);
+          const mergedKeywords = [...new Set([...(existing.keywords || []), ...rule.keywords])];
+          if (mergedKeywords.length !== (existing.keywords || []).length) {
+            await metadataDB.put({
+              ...existing,
+              keywords: mergedKeywords,
+              is_active: existing.is_active !== false,
+              updated: new Date().toISOString()
+            });
+          }
+        } catch (err) {
+          if (err.name !== 'not_found') throw err;
+          await metadataDB.put({
+            _id:           ruleId,
+            type:          'finance:rule',
+            user_id:       userId,
+            category_name: rule.category_name,
+            keywords:      rule.keywords,
+            is_active:     true,
+            is_system:     true,
+            created:       new Date().toISOString(),
+            updated:       new Date().toISOString()
+          });
+        }
+      }
+      return { ok: true };
+    } catch (err) {
+      console.error('CategorizationEngine.ensureObligationRules failed:', err);
+      return { ok: false, error: err.message };
+    }
+  },
+
   async autoTag(rawDescription, metadataDB, userId) {
     try {
       const result = await metadataDB.allDocs({
@@ -41,9 +119,10 @@ export const CategorizationEngine = {
 
       const rules = result.rows.map(r => r.doc)
         .filter(d => d.type === 'finance:rule' && d.is_active);
+      const allRules = [...rules, ...this.obligationRules];
 
       let phrases = [];
-      rules.forEach(rule => {
+      allRules.forEach(rule => {
         (rule.keywords || []).forEach(kw => {
           phrases.push({ phrase: kw.toLowerCase(), length: kw.length, category: rule.category_name });
         });
@@ -64,7 +143,7 @@ export const CategorizationEngine = {
   async teachEngine(keyword, targetCategory, metadataDB, userId) {
     try {
       const cleanKw = keyword.toLowerCase().trim();
-      const slug    = targetCategory.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      const slug    = this._slug(targetCategory);
       const ruleId  = `finance:rule:${userId}:${slug}`;
 
       try {
@@ -96,7 +175,7 @@ export const CategorizationEngine = {
   },
 
   async addCategory(categoryName, type, keywords = [], metadataDB, userId) {
-    const slug   = categoryName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    const slug   = this._slug(categoryName);
     const ruleId = `finance:rule:${userId}:${slug}`;
 
     try { await metadataDB.get(ruleId); return { ok: false, reason: 'already_exists' }; } catch (_) {}
@@ -133,7 +212,7 @@ export const CategorizationEngine = {
   },
 
   async deleteCategory(categoryName, metadataDB, userId) {
-    const slug   = categoryName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    const slug   = this._slug(categoryName);
     const ruleId = `finance:rule:${userId}:${slug}`;
 
     try {
@@ -153,7 +232,7 @@ export const CategorizationEngine = {
   },
 
   async updateCategoryKeywords(categoryName, keywords, metadataDB, userId) {
-    const slug   = categoryName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    const slug   = this._slug(categoryName);
     const ruleId = `finance:rule:${userId}:${slug}`;
     try {
       const doc = await metadataDB.get(ruleId);
@@ -518,6 +597,19 @@ export const FinanceEngine = {
       return;
     }
 
+    if (cat === 'Loan Drawdown') {
+      if (accType === 'Bank' && sub && state.Bank[sub] !== undefined) state.Bank[sub] += amt;
+      else if (accType === 'Cash') state.Cash.cash_main = (state.Cash.cash_main || 0) + amt;
+      return;
+    }
+
+    if (cat === 'Loan Payment') {
+      if (accType === 'Bank' && sub && state.Bank[sub] !== undefined) state.Bank[sub] -= amt;
+      else if (accType === 'Cash') state.Cash.cash_main = (state.Cash.cash_main || 0) - amt;
+      else if (accType === 'Card' && sub && state.Card[sub] !== undefined) state.Card[sub] += amt;
+      return;
+    }
+
     if (isIncome) {
       if (flows) {
         if (cat === 'Reimbursement Received') flows.reimbursementsReceived += amt;
@@ -759,6 +851,20 @@ export const TemporalEngine = {
 // ─────────────────────────────────────────────────────────────
 export const AnalyticsEngine = {
 
+  _isObligationTxn(txn) {
+    return txn?.category === 'Loan Drawdown'
+      || txn?.category === 'Loan Payment'
+      || txn?.category === 'EMI Payment'
+      || !!txn?.loan_id
+      || !!txn?.emi_id;
+  },
+
+  _isExternalLoanPayment(txn) {
+    return txn?.category === 'Loan Payment'
+      && txn?.loan_id
+      && (txn.account_type === 'External' || txn.sub_account === 'external');
+  },
+
   async getMonthlyTrends(transactionsDB, metadataDB, userId) {
     try {
       const config = await FinanceEngine._loadConfig(metadataDB, userId);
@@ -788,6 +894,8 @@ export const AnalyticsEngine = {
         const isIncome = config.income_categories?.includes(cat);
 
         if (doNotTrack.has(cat)) return;
+        if (this._isObligationTxn(txn)) return;
+        if (this._isExternalLoanPayment(txn)) return;
 
         if (!months[key]) months[key] = {
           month: key, income: 0, expense: 0, investment: 0, net: 0, byCategory: {}
@@ -980,5 +1088,1202 @@ export const AccountEngine = {
       await metadataDB.put(doc);
       return { ok: true };
     } catch (err) { return { ok: false, error: err.message }; }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// ObligationsEngine
+//
+// Manages three obligation types stored in metadata_vault:
+//
+//  1. Recurring expenses  finance:recurring:userId:id
+//     Declared repeating bills (Spotify, WiFi, etc.)
+//     Verified against the transaction ledger each cycle.
+//
+//  2. Loans               finance:loan:userId:id
+//     Full loan lifecycle — moratorium phase (drawdowns,
+//     interest accrual, third-party payments) through to
+//     repayment phase (EMI with principal/interest split).
+//     Supports floating rates via rate_history log.
+//
+//  3. EMI purchases        finance:emi:userId:id
+//     Consumer instalment purchases (phone, laptop, etc.)
+//     Fixed schedule from a single purchase event.
+//     Simpler than loans — no drawdowns, no rate changes.
+//
+// Transaction tagging:
+//   Loan drawdowns: { loan_id, category: 'Loan Drawdown' }
+//   Loan payments:  { loan_id, category: 'Loan Payment',
+//                     principal_component, interest_component,
+//                     paid_by }
+//   EMI payments:   { emi_id, category: 'EMI Payment' }
+//
+// Document ID conventions (match engine.js namespace):
+//   finance:recurring:userId:slug
+//   finance:loan:userId:loanId
+//   finance:emi:userId:emiId
+// ─────────────────────────────────────────────────────────────
+
+export const ObligationsEngine = {
+
+  // ═══════════════════════════════════════════════════════════
+  // SECTION 1 — RECURRING EXPENSES
+  // ═══════════════════════════════════════════════════════════
+
+  // ── getRecurring ──────────────────────────────────────────
+  // Returns all active recurring expense declarations for a user.
+  async getRecurring(metadataDB, userId) {
+    try {
+      const result = await metadataDB.allDocs({
+        include_docs: true,
+        startkey: `finance:recurring:${userId}:`,
+        endkey:   `finance:recurring:${userId}:\uffff`
+      });
+      return result.rows.map(r => r.doc)
+        .filter(d => d.type === 'finance:recurring' && d.active !== false);
+    } catch (_) { return []; }
+  },
+
+  // ── addRecurring ──────────────────────────────────────────
+  // Declares a new recurring expense.
+  //
+  // data shape:
+  //   name              string   — display name (e.g. "Netflix")
+  //   amount            number   — expected amount in ₹
+  //   tolerance         number   — fraction tolerance, default 0.10
+  //   frequency         string   — 'daily'|'weekly'|'fortnightly'|
+  //                                'monthly'|'quarterly'|
+  //                                'bi-annual'|'annual'
+  //   frequency_interval number  — e.g. 2 for "every 2 months"
+  //   start_date        string   — YYYY-MM-DD anchor for cycle calc
+  //   day_of_cycle      number   — day within cycle when due
+  //   category          string   — must match ledger category
+  //   account           string   — sub_account value in ledger
+  //   match_by          string   — 'category+account'|'description'
+  //   keywords          string[] — used when match_by='description'
+  //   notes             string
+  async addRecurring(data, metadataDB, userId) {
+    try {
+      const slug = (data.name || `r${Date.now()}`)
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_]/g, '');
+      const id = `finance:recurring:${userId}:${slug}_${Date.now()}`;
+
+      const doc = {
+        _id:                id,
+        type:               'finance:recurring',
+        user_id:            userId,
+        name:               data.name,
+        amount:             Number(data.amount) || 0,
+        tolerance:          data.tolerance          ?? 0.10,
+        frequency:          data.frequency          || 'monthly',
+        frequency_interval: data.frequency_interval || 1,
+        start_date:         data.start_date         || new Date().toISOString().substring(0, 10),
+        day_of_cycle:       data.day_of_cycle        || 1,
+        category:           data.category           || 'Uncategorized',
+        account:            data.account            || '',
+        match_by:           data.match_by           || 'category+account',
+        keywords:           data.keywords           || [],
+        active:             true,
+        notes:              data.notes              || '',
+        created:            new Date().toISOString(),
+        updated:            new Date().toISOString()
+      };
+
+      await metadataDB.put(doc);
+      return { ok: true, id, doc };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── updateRecurring ───────────────────────────────────────
+  async updateRecurring(id, updates, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      const updated = { ...doc, ...updates, updated: new Date().toISOString() };
+      await metadataDB.put(updated);
+      return { ok: true, doc: updated };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── deleteRecurring ───────────────────────────────────────
+  // Soft-deletes by setting active: false (preserves history).
+  async deleteRecurring(id, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      doc.active  = false;
+      doc.updated = new Date().toISOString();
+      await metadataDB.put(doc);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── getCurrentCycleWindow ─────────────────────────────────
+  // Given a recurring item, returns the current cycle's
+  // { cycleStart, cycleEnd, dueDate } relative to today.
+  //
+  // Algorithm:
+  //   1. Convert frequency + interval to days per cycle.
+  //   2. Count cycles elapsed since start_date.
+  //   3. Current cycle = floor(elapsed / cycleDays) * cycleDays.
+  //   4. Due date = cycleStart + day_of_cycle - 1.
+  //
+  // For calendar-aligned frequencies (monthly, quarterly,
+  // bi-annual, annual) we use calendar arithmetic rather than
+  // fixed-day counts to handle month-length variance.
+  getCurrentCycleWindow(recurring) {
+    const today    = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start    = new Date(recurring.start_date);
+    start.setHours(0, 0, 0, 0);
+    const freq     = recurring.frequency          || 'monthly';
+    const interval = recurring.frequency_interval || 1;
+    const dueDay   = recurring.day_of_cycle        || 1;
+
+    // Calendar-aligned frequencies — use month arithmetic
+    const calendarAligned = ['monthly', 'quarterly', 'bi-annual', 'annual'];
+    if (calendarAligned.includes(freq)) {
+      const monthsPerCycle = {
+        monthly:   1,
+        quarterly: 3,
+        'bi-annual': 6,
+        annual:    12
+      }[freq] * interval;
+
+      // Find how many complete cycles have elapsed
+      const totalMonthsElapsed =
+        (today.getFullYear() - start.getFullYear()) * 12
+        + (today.getMonth() - start.getMonth());
+
+      const cycleNumber      = Math.floor(totalMonthsElapsed / monthsPerCycle);
+      const cycleStartMonth  = cycleNumber * monthsPerCycle;
+
+      const cycleStart = new Date(start);
+      cycleStart.setMonth(cycleStart.getMonth() + cycleStartMonth);
+      cycleStart.setDate(1);
+
+      const cycleEnd = new Date(cycleStart);
+      cycleEnd.setMonth(cycleEnd.getMonth() + monthsPerCycle);
+      cycleEnd.setDate(0); // last day of previous month
+
+      // Due date = day_of_cycle within the cycle's month
+      const dueDate = new Date(cycleStart);
+      const maxDay  = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0).getDate();
+      dueDate.setDate(Math.min(dueDay, maxDay));
+
+      return {
+        cycleStart: cycleStart.toISOString().substring(0, 10),
+        cycleEnd:   cycleEnd.toISOString().substring(0, 10),
+        dueDate:    dueDate.toISOString().substring(0, 10),
+      };
+    }
+
+    // Fixed-day frequencies — use day arithmetic
+    const daysPerCycle = {
+      daily:       1,
+      weekly:      7,
+      fortnightly: 14,
+    }[freq] * interval;
+
+    const daysSinceStart = Math.floor((today - start) / 86400000);
+    const cycleNumber    = Math.floor(daysSinceStart / daysPerCycle);
+
+    const cycleStartMs = start.getTime() + cycleNumber * daysPerCycle * 86400000;
+    const cycleEndMs   = cycleStartMs + daysPerCycle * 86400000 - 1;
+
+    const cycleStart = new Date(cycleStartMs);
+    const cycleEnd   = new Date(cycleEndMs);
+    const dueDate    = new Date(cycleStartMs + (Math.min(dueDay, daysPerCycle) - 1) * 86400000);
+
+    return {
+      cycleStart: cycleStart.toISOString().substring(0, 10),
+      cycleEnd:   cycleEnd.toISOString().substring(0, 10),
+      dueDate:    dueDate.toISOString().substring(0, 10),
+    };
+  },
+
+  // ── checkRecurringStatus ──────────────────────────────────
+  // For each active recurring item, checks whether a matching
+  // transaction exists in the current cycle window.
+  //
+  // Returns array of:
+  //   { item, status, matchedTx, cycleStart, cycleEnd,
+  //     dueDate, daysUntilDue, daysOverdue }
+  //
+  // Status values:
+  //   'paid'    — matching transaction found in current cycle
+  //   'pending' — due date not yet passed
+  //   'overdue' — due date passed, no match found
+  async checkRecurringStatus(metadataDB, transactionsDB, userId) {
+    try {
+      const recurring = await this.getRecurring(metadataDB, userId);
+      if (!recurring.length) return [];
+
+      const today = new Date().toISOString().substring(0, 10);
+      const [accounts, cards] = await Promise.all([
+        AccountEngine.getAccounts(metadataDB, userId),
+        AccountEngine.getCards(metadataDB, userId)
+      ]);
+
+      // Load all transactions in one pass — avoid per-item queries
+      const allTxnsResult = await transactionsDB.allDocs({
+        include_docs: true,
+        startkey: `txn:${userId}:`,
+        endkey:   `txn:${userId}:\uffff`
+      });
+      const allTxns = allTxnsResult.rows.map(r => r.doc)
+        .filter(d => d.type === 'transaction' && d.user_id === userId
+                  && !d.loan_id && !d.emi_id); // exclude tagged obligation txns
+
+      return recurring.map(item => {
+        const window = this.getCurrentCycleWindow(item);
+        const { cycleStart, cycleEnd, dueDate } = window;
+
+        // Filter transactions to current cycle window
+        const cycleTxns = allTxns.filter(tx => {
+          const txDate = tx.date || tx._id.split(':')[2] || '';
+          return txDate >= cycleStart && txDate <= cycleEnd;
+        });
+
+        // Match transactions against this recurring item
+        const matchedTx = this._findMatchingTransaction(item, cycleTxns, accounts, cards);
+
+        // Calculate status
+        let status;
+        if (matchedTx) {
+          status = 'paid';
+        } else if (today <= dueDate) {
+          status = 'pending';
+        } else {
+          status = 'overdue';
+        }
+
+        const dueDateObj  = new Date(dueDate);
+        const todayObj    = new Date(today);
+        const diffMs      = dueDateObj - todayObj;
+        const diffDays    = Math.ceil(diffMs / 86400000);
+
+        return {
+          item,
+          status,
+          matchedTx:    matchedTx || null,
+          cycleStart,
+          cycleEnd,
+          dueDate,
+          daysUntilDue: diffDays > 0 ? diffDays : 0,
+          daysOverdue:  diffDays < 0 ? Math.abs(diffDays) : 0,
+        };
+      });
+
+    } catch (err) {
+      console.error('ObligationsEngine.checkRecurringStatus error:', err);
+      return [];
+    }
+  },
+
+  // ── _findMatchingTransaction (private) ────────────────────
+  // Finds the best-matching transaction for a recurring item
+  // within a set of candidate transactions.
+  //
+  // Matching priority:
+  //   1. category + account + amount within tolerance
+  //   2. description keywords (if match_by = 'description')
+  //   3. If multiple matches, pick closest amount to declared
+  _accountAliases(accountRef, accounts = [], cards = []) {
+    const raw = (accountRef || '').toString().trim();
+    if (!raw) return new Set();
+
+    const lowerRaw = raw.toLowerCase();
+    const aliases = new Set([raw, lowerRaw]);
+    [...accounts, ...cards].forEach(account => {
+      const subId = account._id?.split(':').pop();
+      const name = account.name || '';
+      if (
+        raw === account._id ||
+        raw === subId ||
+        lowerRaw === name.toLowerCase()
+      ) {
+        [account._id, subId, name, name.toLowerCase()].filter(Boolean).forEach(a => aliases.add(a));
+      }
+    });
+
+    return aliases;
+  },
+
+  _accountMatches(itemAccount, tx, accounts = [], cards = []) {
+    if (!itemAccount) return true;
+    const aliases = this._accountAliases(itemAccount, accounts, cards);
+    const txnAliases = this._accountAliases(tx.sub_account || '', accounts, cards);
+    if (tx.account_type) txnAliases.add(tx.account_type);
+
+    return [...aliases].some(alias => txnAliases.has(alias));
+  },
+
+  _findMatchingTransaction(item, txns, accounts = [], cards = []) {
+    const expectedAmt = item.amount;
+    const tolerance   = item.tolerance ?? 0.10;
+    const minAmt      = expectedAmt * (1 - tolerance);
+    const maxAmt      = expectedAmt * (1 + tolerance);
+
+    let candidates = [];
+
+    if (item.match_by === 'description' && item.keywords?.length) {
+      const kws = item.keywords.map(k => k.toLowerCase());
+      candidates = txns.filter(tx => {
+        const desc = (tx.description || '').toLowerCase();
+        return kws.some(k => desc.includes(k))
+          && Math.abs(tx.amount) >= minAmt
+          && Math.abs(tx.amount) <= maxAmt;
+      });
+    } else {
+      // category + account match (default)
+      candidates = txns.filter(tx => {
+        const amtMatch      = Math.abs(tx.amount) >= minAmt && Math.abs(tx.amount) <= maxAmt;
+        const categoryMatch = tx.category === item.category;
+        const accountMatch  = this._accountMatches(item.account, tx, accounts, cards);
+        return amtMatch && categoryMatch && accountMatch;
+      });
+    }
+
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    // Multiple candidates — return closest amount match
+    return candidates.reduce((best, tx) =>
+      Math.abs(Math.abs(tx.amount) - expectedAmt) <
+      Math.abs(Math.abs(best.amount) - expectedAmt) ? tx : best
+    );
+  },
+
+
+  // ═══════════════════════════════════════════════════════════
+  // SECTION 2 — LOANS
+  // ═══════════════════════════════════════════════════════════
+
+  // ── getLoans ──────────────────────────────────────────────
+  async getLoans(metadataDB, userId) {
+    try {
+      const result = await metadataDB.allDocs({
+        include_docs: true,
+        startkey: `finance:loan:${userId}:`,
+        endkey:   `finance:loan:${userId}:\uffff`
+      });
+      return result.rows.map(r => r.doc)
+        .filter(d => d.type === 'finance:loan' && d.status !== 'closed');
+    } catch (_) { return []; }
+  },
+
+  // ── addLoan ───────────────────────────────────────────────
+  // data shape:
+  //   name               string   — "SBI Education Loan"
+  //   loan_type          string   — 'education'|'home'|'personal'|
+  //                                 'vehicle'|'other'
+  //   sanctioned_amount  number   — total sanctioned
+  //   disbursed_amount   number   — drawn so far (0 if not started)
+  //   interest_rate      number   — current rate (percentage p.a.)
+  //   rate_type          string   — 'fixed'|'floating'
+  //   phase              string   — 'moratorium'|'repayment'
+  //   moratorium_end     string   — YYYY-MM-DD when repayment starts
+  //   emi                number   — 0 during moratorium
+  //   tenure_months      number   — repayment duration used for EMI planning
+  //   emi_day            number   — day of month EMI is due
+  //   payment_sources    array    — external payers
+  //   debit_account      string   — account drawdowns credit to
+  //   emi_account        string   — account EMI debits from
+  //   start_date         string   — loan start date
+  async addLoan(data, metadataDB, userId) {
+    try {
+      const loanId = `loan_${Date.now()}`;
+      const id     = `finance:loan:${userId}:${loanId}`;
+
+      const doc = {
+        _id:               id,
+        type:              'finance:loan',
+        user_id:           userId,
+        name:              data.name,
+        loan_type:         data.loan_type          || 'other',
+        sanctioned_amount: Number(data.sanctioned_amount) || 0,
+        disbursed_amount:  Number(data.disbursed_amount)  || 0,
+        interest_rate:     Number(data.interest_rate)     || 0,
+        rate_type:         data.rate_type          || 'floating',
+        rate_history:      [{
+          date: data.start_date || new Date().toISOString().substring(0, 10),
+          rate: Number(data.interest_rate) || 0
+        }],
+        phase:             data.phase              || 'moratorium',
+        moratorium_end:    data.moratorium_end     || null,
+        emi:               Number(data.emi)         || 0,
+        tenure_months:     Number(data.tenure_months) || null,
+        emi_day:           data.emi_day            || 5,
+        payment_sources:   data.payment_sources    || [],
+        debit_account:     data.debit_account      || '',
+        emi_account:       data.emi_account        || null,
+        start_date:        data.start_date         || new Date().toISOString().substring(0, 10),
+        expected_end_date: data.expected_end_date  || null,
+        status:            'active',
+        notes:             data.notes              || '',
+        created:           new Date().toISOString(),
+        updated:           new Date().toISOString()
+      };
+
+      await metadataDB.put(doc);
+      return { ok: true, id, doc };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── updateLoan ────────────────────────────────────────────
+  async updateLoan(id, updates, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+
+      // If rate is being updated, append to rate_history
+      if (updates.interest_rate !== undefined && updates.interest_rate !== doc.interest_rate) {
+        const effectiveDate = updates.rate_effective_date
+          || new Date().toISOString().substring(0, 10);
+        const history = [...(doc.rate_history || []), {
+          date: effectiveDate,
+          rate: Number(updates.interest_rate)
+        }];
+        updates.rate_history = history;
+        delete updates.rate_effective_date;
+      }
+
+      const updated = { ...doc, ...updates, updated: new Date().toISOString() };
+      await metadataDB.put(updated);
+      return { ok: true, doc: updated };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── updateLoanRate ────────────────────────────────────────
+  // Convenience method — rate change with explicit effective date.
+  async updateLoanRate(loanId, newRate, effectiveDate, metadataDB, userId) {
+    return this.updateLoan(loanId, {
+      interest_rate:        newRate,
+      rate_effective_date:  effectiveDate
+    }, metadataDB, userId);
+  },
+
+  calculateLoanEmi(principal, annualRate, tenureMonths) {
+    const p = Math.max(0, Number(principal) || 0);
+    const n = Math.max(0, Number(tenureMonths) || 0);
+    const r = (Number(annualRate) || 0) / 100 / 12;
+    if (p <= 0 || n <= 0) return 0;
+    if (r <= 0) return p / n;
+    const factor = Math.pow(1 + r, n);
+    return (p * r * factor) / (factor - 1);
+  },
+
+  _monthKey(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  },
+
+  _formatDateOnly(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  },
+
+  _dateOnly(value) {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (isNaN(date.getTime())) return null;
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  },
+
+  _effectiveLoanPhase(loan, asOfDate = null) {
+    const storedPhase = loan?.phase || 'moratorium';
+    if (storedPhase !== 'moratorium') return storedPhase;
+
+    const moratoriumEnd = this._dateOnly(loan?.moratorium_end);
+    if (!moratoriumEnd) return storedPhase;
+
+    const asOf = this._dateOnly(asOfDate) || new Date();
+    return asOf >= moratoriumEnd ? 'repayment' : 'moratorium';
+  },
+
+  _addMonths(date, count = 1) {
+    const next = new Date(date);
+    next.setMonth(next.getMonth() + count);
+    return next;
+  },
+
+  _rateForDate(loan, date) {
+    const target = this._dateOnly(date) || new Date();
+    const history = (loan.rate_history || [])
+      .map(entry => ({ date: this._dateOnly(entry.date), rate: Number(entry.rate) || 0 }))
+      .filter(entry => entry.date)
+      .sort((a, b) => a.date - b.date);
+
+    let rate = Number(loan.interest_rate) || 0;
+    for (const entry of history) {
+      if (entry.date <= target) rate = entry.rate;
+      else break;
+    }
+    return rate;
+  },
+
+  // ── deleteLoan ────────────────────────────────────────────
+  async deleteLoan(id, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      doc.status  = 'closed';
+      doc.updated = new Date().toISOString();
+      await metadataDB.put(doc);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── recordDrawdown ────────────────────────────────────────
+  // Logs a loan drawdown as a transaction (money IN to your account)
+  // and updates the loan's disbursed_amount.
+  async recordDrawdown(loanId, amount, date, description, transactionsDB, metadataDB, userId) {
+    try {
+      const loan   = await metadataDB.get(loanId);
+      if (loan.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      const absAmount = Math.abs(Number(amount) || 0);
+
+      const txnId = `txn:${userId}:${date}:drawdown_${Date.now()}`;
+      await transactionsDB.put({
+        _id:          txnId,
+        type:         'transaction',
+        user_id:      userId,
+        date,
+        amount:       Math.abs(amount),   // positive — money coming in
+        description:  description || `${loan.name} — Drawdown`,
+        category:     'Loan Drawdown',
+        account_type: 'Bank',
+        sub_account:  loan.debit_account,
+        loan_id:      loanId,
+        created:      new Date().toISOString()
+      });
+
+      // Update disbursed_amount on the loan document
+      let priorDrawdownTotal = 0;
+      try {
+        const result = await transactionsDB.allDocs({
+          include_docs: true,
+          startkey: `txn:${userId}:`,
+          endkey:   `txn:${userId}:\uffff`
+        });
+        priorDrawdownTotal = result.rows.map(r => r.doc)
+          .filter(d =>
+            d.type === 'transaction' &&
+            d.user_id === userId &&
+            d.loan_id === loanId &&
+            d.category === 'Loan Drawdown' &&
+            d._id !== txnId
+          )
+          .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+      } catch {
+        priorDrawdownTotal = 0;
+      }
+
+      const declaredDrawn = Math.max(0, Number(loan.disbursed_amount) || 0);
+      const startDate = this._dateOnly(loan.start_date || loan.created);
+      const drawdownDate = this._dateOnly(date);
+      const looksLikeOpeningDrawdown =
+        priorDrawdownTotal <= 0 &&
+        declaredDrawn > 0 &&
+        absAmount <= declaredDrawn &&
+        (!startDate || !drawdownDate || drawdownDate <= startDate);
+
+      if (!looksLikeOpeningDrawdown) {
+        loan.disbursed_amount = declaredDrawn + absAmount;
+      }
+      loan.updated          = new Date().toISOString();
+      await metadataDB.put(loan);
+
+      return { ok: true, txnId, disbursedAmountUpdated: !looksLikeOpeningDrawdown };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── recordPayment ─────────────────────────────────────────
+  // Logs a loan payment as a transaction.
+  // For moratorium phase: all goes to interest (or capitalises).
+  // For repayment phase: split provided by caller or calculated.
+  //
+  // If principal_component + interest_component are not provided,
+  // the engine calculates the split from current outstanding + rate.
+  async recordPayment(loanId, amount, date, paidBy, transactionsDB, metadataDB, userId, components = null, accountOverride = null) {
+    try {
+      const loan    = await metadataDB.get(loanId);
+      if (loan.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+
+      let principalComponent = 0;
+      let interestComponent  = Math.abs(amount);
+
+      if (components) {
+        principalComponent = components.principal || 0;
+        interestComponent  = components.interest  || 0;
+      } else if (this._effectiveLoanPhase(loan, date) === 'repayment' && loan.emi > 0) {
+        const balance = await this.getLoanBalance(loan, transactionsDB, userId, date);
+        interestComponent = Math.min(Math.abs(amount), Math.max(0, balance.outstandingInterest || balance.nextInterestDue || 0));
+        principalComponent = Math.max(0, Math.abs(amount) - interestComponent);
+      }
+
+      const account = paidBy === userId
+        ? accountOverride || loan.emi_account || loan.debit_account
+        : null; // external payer — no sub_account
+
+      const txnId = `txn:${userId}:${date}:loanpmt_${Date.now()}`;
+      await transactionsDB.put({
+        _id:                  txnId,
+        type:                 'transaction',
+        user_id:              userId,
+        date,
+        amount:               -Math.abs(amount),  // negative — money going out
+        description:          `${loan.name} — Payment`,
+        category:             'Loan Payment',
+        account_type:         account ? 'Bank' : 'External',
+        sub_account:          account || 'external',
+        loan_id:              loanId,
+        paid_by:              paidBy || userId,
+        principal_component:  principalComponent,
+        interest_component:   interestComponent,
+        created:              new Date().toISOString()
+      });
+
+      return { ok: true, txnId, principalComponent, interestComponent };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── getLoanBalance ────────────────────────────────────────
+  // Calculates the current outstanding balance from tagged transactions.
+  // Handles rate changes by applying the correct rate to each period.
+  //
+  // Returns:
+  //   outstanding         — current principal owed
+  //   totalDrawn          — sum of all drawdowns
+  //   totalPaid           — sum of all payments made
+  //   principalPaid       — principal component paid to date
+  //   interestPaid        — interest component paid to date
+  //   capitalizedInterest — interest added to principal (shortfall)
+  //   nextInterestDue     — projected interest for current month
+  //   nextDueDate         — date of next scheduled payment
+  //   phase               — current phase
+  async getLoanBalance(loan, transactionsDB, userId, asOfDate = null) {
+    try {
+      const result = await transactionsDB.allDocs({
+        include_docs: true,
+        startkey: `txn:${userId}:`,
+        endkey:   `txn:${userId}:\uffff`
+      });
+
+      const asOf = this._dateOnly(asOfDate) || new Date();
+      const effectivePhase = this._effectiveLoanPhase(loan, asOf);
+      const loanTxns = result.rows.map(r => r.doc)
+        .filter(d =>
+          d.type === 'transaction' &&
+          d.user_id === userId &&
+          d.loan_id === loan._id &&
+          (!d.date || this._dateOnly(d.date) <= asOf)
+        )
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+      const drawdowns = loanTxns.filter(t => t.category === 'Loan Drawdown');
+      const payments  = loanTxns.filter(t => t.category === 'Loan Payment');
+
+      const totalDrawn    = drawdowns.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const totalPaid     = payments.reduce((s, t)  => s + Math.abs(t.amount), 0);
+      const declaredDrawn = Number(loan.disbursed_amount || 0);
+      const openingPrincipal = Math.max(0, declaredDrawn - totalDrawn);
+      let balance = openingPrincipal;
+      let outstandingInterest = 0;
+      let accruedInterest = 0;
+      let interestPaid = 0;
+      let principalPaid = 0;
+
+      const startDate = this._dateOnly(loan.start_date)
+        || this._dateOnly(loan.created)
+        || (loanTxns[0] ? this._dateOnly(loanTxns[0].date) : null)
+        || asOf;
+
+      const events = [
+        ...drawdowns.map(txn => ({ type: 'drawdown', date: this._dateOnly(txn.date), amount: Math.abs(Number(txn.amount) || 0) })),
+        ...payments.map(txn => ({
+          type: 'payment',
+          date: this._dateOnly(txn.date),
+          amount: Math.abs(Number(txn.amount) || 0),
+          principalComponent: txn.principal_component !== undefined && txn.principal_component !== null
+            ? Math.max(0, Number(txn.principal_component) || 0)
+            : null,
+          interestComponent: txn.interest_component !== undefined && txn.interest_component !== null
+            ? Math.max(0, Number(txn.interest_component) || 0)
+            : null
+        }))
+      ].filter(event => event.date && event.date <= asOf);
+
+      for (let accrualDate = this._addMonths(startDate, 1); accrualDate <= asOf; accrualDate = this._addMonths(accrualDate, 1)) {
+        events.push({ type: 'accrual', date: new Date(accrualDate), amount: 0 });
+      }
+
+      events.sort((a, b) => {
+        const diff = a.date - b.date;
+        if (diff !== 0) return diff;
+        const order = { drawdown: 0, accrual: 1, payment: 2 };
+        return order[a.type] - order[b.type];
+      });
+
+      for (const event of events) {
+        if (event.type === 'drawdown') {
+          balance += event.amount;
+          continue;
+        }
+
+        if (event.type === 'accrual') {
+          if (balance <= 0) continue;
+          const monthlyRate = this._rateForDate(loan, event.date) / 100 / 12;
+          const interest = balance * monthlyRate;
+          accruedInterest += interest;
+          outstandingInterest += interest;
+          balance += interest;
+          continue;
+        }
+
+        if (event.type === 'payment') {
+          const payment = Math.min(event.amount, balance);
+          let interestComponent = Math.min(payment, outstandingInterest);
+          let principalComponent = Math.max(0, payment - interestComponent);
+
+          if (event.principalComponent !== null || event.interestComponent !== null) {
+            const explicitInterest = event.interestComponent ?? Math.max(0, payment - (event.principalComponent || 0));
+            interestComponent = Math.min(payment, explicitInterest);
+            principalComponent = Math.min(
+              Math.max(0, payment - interestComponent),
+              event.principalComponent ?? Math.max(0, payment - interestComponent)
+            );
+          }
+
+          outstandingInterest = Math.max(0, outstandingInterest - interestComponent);
+          interestPaid += interestComponent;
+          principalPaid += principalComponent;
+          balance = Math.max(0, balance - payment);
+        }
+      }
+
+      const currentMonthlyRate = this._rateForDate(loan, asOf) / 100 / 12;
+      const nextInterestDue = balance * currentMonthlyRate;
+
+      // Next due date is only a repayment-cycle EMI date. During moratorium,
+      // show the moratorium end date as the next milestone instead.
+      let nextDueDate = loan.moratorium_end || null;
+      if (effectivePhase === 'repayment') {
+        const basisDate = this._dateOnly(asOf) || new Date();
+        let nextDue = new Date(basisDate.getFullYear(), basisDate.getMonth(), loan.emi_day || 5);
+        if (nextDue < basisDate) nextDue = new Date(basisDate.getFullYear(), basisDate.getMonth() + 1, loan.emi_day || 5);
+        nextDueDate = this._formatDateOnly(nextDue);
+      }
+
+      return {
+        outstanding:          balance,
+        totalDrawn,
+        totalPaid,
+        principalPaid,
+        interestPaid,
+        accruedInterest,
+        outstandingInterest,
+        capitalizedInterest:  outstandingInterest,
+        nextInterestDue,
+        nextDueDate,
+        phase:               effectivePhase,
+        storedPhase:         loan.phase || 'moratorium',
+        transactionCount:    loanTxns.length
+      };
+
+    } catch (err) {
+      console.error('ObligationsEngine.getLoanBalance error:', err);
+      return { outstanding: loan.disbursed_amount || 0, totalDrawn: 0, totalPaid: 0,
+               principalPaid: 0, interestPaid: 0, nextInterestDue: 0,
+               nextDueDate: null, phase: loan.phase || 'moratorium', transactionCount: 0 };
+    }
+  },
+
+  // ── getLoanProjection ─────────────────────────────────────
+  // Projects the full repayment schedule from a given outstanding
+  // balance. Used for displaying payoff date and total interest.
+  //
+  // Returns:
+  //   schedule[]    — array of { month, emi, principal, interest, balance }
+  //   payoffDate    — projected YYYY-MM when loan is fully paid
+  //   totalRemInterest   — total interest remaining
+  //   totalRemPrincipal  — total principal remaining
+  getLoanProjection(loan, currentOutstanding) {
+    const effectivePhase = this._effectiveLoanPhase(loan);
+    if (!loan.emi || loan.emi <= 0 || effectivePhase !== 'repayment') {
+      // Moratorium phase — can't project without EMI
+      return { schedule: [], payoffDate: null, totalRemInterest: 0, totalRemPrincipal: currentOutstanding, unpayable: false };
+    }
+
+    let   balance     = currentOutstanding;
+    const schedule    = [];
+    let   month       = new Date();
+    let   iterations  = 0;
+    const MAX_MONTHS  = 600; // 50 years hard cap
+
+    while (balance > 0.01 && iterations < MAX_MONTHS) {
+      const monthlyRate = this._rateForDate(loan, month) / 100 / 12;
+      const interest  = balance * monthlyRate;
+      if (monthlyRate > 0 && interest >= loan.emi) {
+        return {
+          schedule,
+          payoffDate: null,
+          totalRemInterest: schedule.reduce((s, r) => s + r.interest, 0),
+          totalRemPrincipal: balance,
+          unpayable: true,
+          minimumEmi: interest + 0.01
+        };
+      }
+      const principal = Math.min(Math.max(0, loan.emi - interest), balance);
+      balance         = Math.max(0, balance + interest - loan.emi);
+
+      const monthStr = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
+      schedule.push({ month: monthStr, emi: loan.emi, principal, interest, balance, rate: this._rateForDate(loan, month) });
+
+      month.setMonth(month.getMonth() + 1);
+      iterations++;
+    }
+
+    const totalRemInterest  = schedule.reduce((s, r) => s + r.interest,  0);
+    const totalRemPrincipal = schedule.reduce((s, r) => s + r.principal, 0);
+    const payoffDate        = schedule.length > 0 ? schedule[schedule.length - 1].month : null;
+
+    return { schedule, payoffDate, totalRemInterest, totalRemPrincipal, unpayable: false };
+  },
+
+
+  // ═══════════════════════════════════════════════════════════
+  // SECTION 3 — EMI PURCHASES
+  // ═══════════════════════════════════════════════════════════
+
+  // ── getEMIs ───────────────────────────────────────────────
+  async getEMIs(metadataDB, userId) {
+    try {
+      const result = await metadataDB.allDocs({
+        include_docs: true,
+        startkey: `finance:emi:${userId}:`,
+        endkey:   `finance:emi:${userId}:\uffff`
+      });
+      return result.rows.map(r => r.doc)
+        .filter(d => d.type === 'finance:emi' && d.status !== 'closed');
+    } catch (_) { return []; }
+  },
+
+  // ── addEMI ────────────────────────────────────────────────
+  // data shape:
+  //   name             string  — "iPhone 15 Pro"
+  //   total_amount     number  — full purchase price
+  //   down_payment     number  — paid upfront (can be 0)
+  //   financed_amount  number  — total_amount - down_payment
+  //   emi_amount       number  — monthly instalment
+  //   tenure_months    number  — total EMI count
+  //   interest_rate    number  — 0 for no-cost EMI schemes
+  //   rate_type        string  — always 'fixed' for consumer EMI
+  //   account          string  — card/bank account EMI hits
+  //   purchase_date    string  — YYYY-MM-DD
+  //   first_emi_date   string  — YYYY-MM-DD
+  //   category         string  — e.g. 'Electronics'
+  async addEMI(data, metadataDB, userId) {
+    try {
+      const emiId = `emi_${Date.now()}`;
+      const id    = `finance:emi:${userId}:${emiId}`;
+
+      const financed = data.financed_amount !== undefined
+        ? Number(data.financed_amount)
+        : Number(data.total_amount || 0) - Number(data.down_payment || 0);
+
+      const doc = {
+        _id:             id,
+        type:            'finance:emi',
+        user_id:         userId,
+        name:            data.name,
+        total_amount:    Number(data.total_amount)  || 0,
+        down_payment:    Number(data.down_payment)  || 0,
+        financed_amount: financed,
+        emi_amount:      Number(data.emi_amount)    || 0,
+        tenure_months:   Number(data.tenure_months) || 12,
+        months_paid:     0,
+        interest_rate:   Number(data.interest_rate) || 0,
+        rate_type:       'fixed',
+        account:         data.account               || '',
+        purchase_date:   data.purchase_date         || new Date().toISOString().substring(0, 10),
+        first_emi_date:  data.first_emi_date        || null,
+        category:        data.category              || 'Uncategorized',
+        status:          'active',
+        notes:           data.notes                 || '',
+        created:         new Date().toISOString(),
+        updated:         new Date().toISOString()
+      };
+
+      await metadataDB.put(doc);
+      return { ok: true, id, doc };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── updateEMI ─────────────────────────────────────────────
+  async updateEMI(id, updates, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      const updated = { ...doc, ...updates, updated: new Date().toISOString() };
+      await metadataDB.put(updated);
+      return { ok: true, doc: updated };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── deleteEMI ─────────────────────────────────────────────
+  async deleteEMI(id, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(id);
+      if (doc.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+      doc.status  = 'closed';
+      doc.updated = new Date().toISOString();
+      await metadataDB.put(doc);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── getEMIBalance ─────────────────────────────────────────
+  // Derives months_paid from tagged transactions, calculates
+  // remaining balance and projected payoff date.
+  //
+  // Returns:
+  //   monthsPaid        — count of tagged EMI payments found
+  //   monthsRemaining   — tenure - monthsPaid
+  //   outstanding       — remaining financed amount
+  //   nextDueDate       — date of next EMI
+  //   payoffDate        — projected completion month
+  //   percentComplete   — 0–100
+  async recordEMIPayment(emiId, amount, date, transactionsDB, metadataDB, userId, components = null) {
+    try {
+      const emi = await metadataDB.get(emiId);
+      if (emi.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+
+      const absAmount = Math.abs(Number(amount) || 0);
+      const financedAmount = Math.max(0, Number(emi.financed_amount ?? (
+        Number(emi.total_amount || 0) - Number(emi.down_payment || 0)
+      )));
+      const totalPayable = Math.max(
+        Number(emi.emi_amount || 0) * Number(emi.tenure_months || 0),
+        financedAmount,
+        absAmount
+      );
+      const principalComponent = components?.principal !== undefined
+        ? Number(components.principal) || 0
+        : Math.min(financedAmount, totalPayable > 0 ? absAmount * (financedAmount / totalPayable) : absAmount);
+      const interestComponent = components?.interest !== undefined
+        ? Number(components.interest) || 0
+        : Math.max(0, absAmount - principalComponent);
+
+      const txnId = `txn:${userId}:${date}:emipmt_${Date.now()}`;
+      await transactionsDB.put({
+        _id:                 txnId,
+        type:                'transaction',
+        user_id:             userId,
+        date,
+        amount:              -absAmount,
+        description:         `${emi.name} - EMI Payment`,
+        category:            'EMI Payment',
+        account_type:        emi.account_type || 'Bank',
+        sub_account:         emi.account || '',
+        emi_id:              emiId,
+        principal_component: principalComponent,
+        interest_component:  interestComponent,
+        created:             new Date().toISOString()
+      });
+
+      return { ok: true, txnId, principalComponent, interestComponent };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  async getEMIBalance(emi, transactionsDB, userId) {
+    try {
+      const result = await transactionsDB.allDocs({
+        include_docs: true,
+        startkey: `txn:${userId}:`,
+        endkey:   `txn:${userId}:\uffff`
+      });
+
+      const emiTxns = result.rows.map(r => r.doc)
+        .filter(d =>
+          d.type === 'transaction' &&
+          d.user_id === userId &&
+          d.emi_id === emi._id &&
+          d.category === 'EMI Payment'
+        )
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+      const tenureMonths   = Math.max(0, Number(emi.tenure_months || 0));
+      const emiAmount      = Math.max(0, Number(emi.emi_amount || 0));
+      const financedAmount = Math.max(0, Number(emi.financed_amount ?? (
+        Number(emi.total_amount || 0) - Number(emi.down_payment || 0)
+      )));
+      const totalPayable   = Math.max(emiAmount * tenureMonths, financedAmount);
+      const fallbackRatio  = totalPayable > 0 ? financedAmount / totalPayable : 1;
+
+      const totalPaid = emiTxns.reduce((s, t) => s + Math.abs(Number(t.amount || 0)), 0);
+      const principalPaidRaw = emiTxns.reduce((s, t) => {
+        if (t.principal_component !== undefined && t.principal_component !== null) {
+          return s + Math.max(0, Number(t.principal_component) || 0);
+        }
+        return s + (Math.abs(Number(t.amount || 0)) * fallbackRatio);
+      }, 0);
+      const interestPaid = emiTxns.reduce((s, t) => {
+        if (t.interest_component !== undefined && t.interest_component !== null) {
+          return s + Math.max(0, Number(t.interest_component) || 0);
+        }
+        return s + Math.max(0, Math.abs(Number(t.amount || 0)) * (1 - fallbackRatio));
+      }, 0);
+      const principalPaid = Math.min(financedAmount, principalPaidRaw);
+      const outstanding = Math.max(0, financedAmount - principalPaid);
+      const monthsPaid = emiAmount > 0
+        ? Math.min(tenureMonths, Math.floor((totalPaid + 0.01) / emiAmount))
+        : Math.min(tenureMonths, emiTxns.length);
+      const scheduledMonthsRemaining = Math.max(0, tenureMonths - monthsPaid);
+      const principalPerMonth = tenureMonths > 0 ? financedAmount / tenureMonths : 0;
+      const balanceMonthsRemaining = principalPerMonth > 0
+        ? Math.ceil(outstanding / principalPerMonth)
+        : scheduledMonthsRemaining;
+      const monthsRemaining = Math.min(scheduledMonthsRemaining, balanceMonthsRemaining);
+
+      // Next due date
+      let nextDueDate = null;
+      if (emi.first_emi_date && monthsRemaining > 0) {
+        const first = new Date(emi.first_emi_date);
+        first.setMonth(first.getMonth() + monthsPaid);
+        nextDueDate = first.toISOString().substring(0, 10);
+      }
+
+      // Payoff date
+      let payoffDate = null;
+      if (emi.first_emi_date) {
+        const first = new Date(emi.first_emi_date);
+        first.setMonth(first.getMonth() + tenureMonths - 1);
+        payoffDate = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}`;
+      }
+
+      const percentComplete = financedAmount > 0
+        ? Math.min(100, Math.round(((financedAmount - outstanding) / financedAmount) * 100))
+        : tenureMonths > 0
+          ? Math.min(100, Math.round((monthsPaid / tenureMonths) * 100))
+          : 0;
+      const totalRemaining = Math.max(0, (emiAmount * monthsRemaining) - Math.max(0, totalPaid - (emiAmount * monthsPaid)));
+
+      return {
+        monthsPaid,
+        monthsRemaining,
+        outstanding,
+        totalPaid,
+        principalPaid,
+        interestPaid,
+        totalRemaining,
+        nextDueDate,
+        payoffDate,
+        percentComplete,
+        transactionCount: emiTxns.length
+      };
+
+    } catch (err) {
+      console.error('ObligationsEngine.getEMIBalance error:', err);
+      const monthsPaid = emi.months_paid || 0;
+      const tenureMonths = Number(emi.tenure_months || 0);
+      const financedAmount = Math.max(0, Number(emi.financed_amount ?? (
+        Number(emi.total_amount || 0) - Number(emi.down_payment || 0)
+      )));
+      return {
+        monthsPaid,
+        monthsRemaining: Math.max(0, tenureMonths - monthsPaid),
+        outstanding: financedAmount,
+        totalPaid: 0,
+        principalPaid: 0,
+        interestPaid: 0,
+        totalRemaining: Math.max(0, (tenureMonths - monthsPaid) * Number(emi.emi_amount || 0)),
+        nextDueDate: null, payoffDate: null, percentComplete: 0, transactionCount: 0
+      };
+    }
+  },
+
+  // ── getSummary ────────────────────────────────────────────
+  // Convenience method called by useFinanceData.
+  // Returns everything needed for ObligationsSlide in one call.
+  //
+  // Returns:
+  //   recurring         — checkRecurringStatus results
+  //   loans             — loan docs + balance for each
+  //   emis              — EMI docs + balance for each
+  //   totalMonthlyLoad  — sum of all recurring + active EMIs + loan EMIs
+  //   recurringStats    — { paid, pending, overdue, total }
+  async getSummary(metadataDB, transactionsDB, userId) {
+    try {
+      const [recurringStatus, loans, emis] = await Promise.all([
+        this.checkRecurringStatus(metadataDB, transactionsDB, userId),
+        this.getLoans(metadataDB, userId),
+        this.getEMIs(metadataDB, userId)
+      ]);
+
+      const [loanBalances, emiBalances] = await Promise.all([
+        Promise.all(loans.map(l => this.getLoanBalance(l, transactionsDB, userId))),
+        Promise.all(emis.map(e => this.getEMIBalance(e, transactionsDB, userId)))
+      ]);
+
+      const loansWithBalance = loans.map((l, i) => ({
+        ...l,
+        storedPhase: l.phase || 'moratorium',
+        phase: loanBalances[i]?.phase || l.phase || 'moratorium',
+        balance: loanBalances[i]
+      }));
+      const emisWithBalance  = emis.map((e,  i) => ({ ...e, balance: emiBalances[i] }));
+
+      // Monthly load calculation
+      const recurringMonthlyLoad = recurringStatus.reduce((s, r) => {
+        // Normalise all frequencies to monthly equivalent
+        const freqToMonthly = {
+          daily:       30,
+          weekly:      4.33,
+          fortnightly: 2.17,
+          monthly:     1,
+          quarterly:   1 / 3,
+          'bi-annual': 1 / 6,
+          annual:      1 / 12
+        };
+        const multiplier = freqToMonthly[r.item.frequency] || 1;
+        return s + (r.item.amount * multiplier * (r.item.frequency_interval || 1));
+      }, 0);
+
+      const emiMonthlyLoad  = emisWithBalance
+        .filter(e => e.balance.monthsRemaining > 0)
+        .reduce((s, e) => s + e.emi_amount, 0);
+
+      const loanMonthlyLoad = loansWithBalance
+        .filter(l => l.phase === 'repayment' && l.emi > 0)
+        .reduce((s, l) => s + l.emi, 0);
+
+      const totalMonthlyLoad = recurringMonthlyLoad + emiMonthlyLoad + loanMonthlyLoad;
+
+      const recurringStats = {
+        paid:    recurringStatus.filter(r => r.status === 'paid').length,
+        pending: recurringStatus.filter(r => r.status === 'pending').length,
+        overdue: recurringStatus.filter(r => r.status === 'overdue').length,
+        total:   recurringStatus.length
+      };
+
+      return {
+        recurring:        recurringStatus,
+        loans:            loansWithBalance,
+        emis:             emisWithBalance,
+        totalMonthlyLoad,
+        recurringMonthlyLoad,
+        emiMonthlyLoad,
+        loanMonthlyLoad,
+        recurringStats
+      };
+
+    } catch (err) {
+      console.error('ObligationsEngine.getSummary error:', err);
+      return { recurring: [], loans: [], emis: [], totalMonthlyLoad: 0,
+               recurringMonthlyLoad: 0, emiMonthlyLoad: 0, loanMonthlyLoad: 0,
+               recurringStats: { paid: 0, pending: 0, overdue: 0, total: 0 } };
+    }
   }
 };

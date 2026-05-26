@@ -342,7 +342,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                           {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '10px', marginLeft: '5px' }}>[PRI]</span>}
                         </td>
                         <td style={{ color: 'var(--text-d)', fontFamily: 'var(--mono)' }}>₹{fmtLimit(c.limit)}</td>
-                        <td style={{ color: 'var(--text-d)' }}>{c.billing_day} → {c.due_day}</td>
+                        <td style={{ color: 'var(--text-d)' }}>BILL {c.billing_day} / DUE {c.due_day}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button className="action-btn" onClick={() => setForm({ _docId: c._id, name: c.name, billing_day: c.billing_day, due_day: c.due_day, due_month_offset: c.due_month_offset, limit: c.limit || 0, is_default: !!c.is_default })}>EDIT</button>
                           <button className="action-btn del" onClick={() => handleDeleteCard(c._id)}>DEL</button>

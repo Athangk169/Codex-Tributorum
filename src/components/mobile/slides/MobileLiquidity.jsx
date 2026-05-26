@@ -147,6 +147,18 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
         .card-dropdown-item:last-child { border-bottom: none; }
         .card-dropdown-item.active-card { color: var(--ba-gold); }
         .card-dropdown-item:active { background: rgba(200,34,0,0.1); }
+        .card-select-rune {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 18px; height: 18px; flex: 0 0 18px;
+          border: 1px solid var(--ba-border);
+          color: var(--ba-gold); font-size: 10px; line-height: 1;
+          box-shadow: inset 0 0 8px rgba(201,168,76,0.12), 0 0 8px rgba(201,168,76,0.08);
+        }
+        .card-select-rune.open {
+          border-color: var(--ba-gold);
+          background: rgba(201,168,76,0.08);
+          text-shadow: 0 0 8px rgba(201,168,76,0.8);
+        }
 
         /* ── Bucket status badge ── */
         .status-badge {
@@ -181,7 +193,9 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
               onClick={() => setShowCardSelect(s => !s)}
             >
               <span>{activeCard ? `${activeCard.name}${activeCard.is_default ? ' [PRI]' : ''}` : 'NO CARD SELECTED'}</span>
-              <span style={{ color: 'var(--ba-gold)', fontSize: '10px' }}>{showCardSelect ? '▲' : '▼'}</span>
+              <span className={`card-select-rune ${showCardSelect ? 'open' : ''}`} aria-hidden="true">
+                {showCardSelect ? '◈' : '◇'}
+              </span>
             </button>
             {showCardSelect && (
               <div className="card-dropdown">
@@ -268,7 +282,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     <span style={{ color: '#fff', fontSize: '11px' }}>{c.name}</span>
                     {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '9px', marginLeft: '6px' }}>[PRI]</span>}
                     <div style={{ fontSize: '10px', color: 'var(--text-d)', marginTop: '2px' }}>
-                      ₹{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'} · {c.billing_day}→{c.due_day}
+                      ₹{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'} · BILL {c.billing_day} / DUE {c.due_day}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>

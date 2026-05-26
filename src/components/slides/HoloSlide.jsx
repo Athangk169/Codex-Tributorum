@@ -155,7 +155,7 @@ const HoloSlide = ({ data, db, userId }) => {
     }
   }, [db, userId]);
 
-  useEffect(() => { loadRules(); }, [loadRules, userId]);
+  useEffect(() => { loadRules(); }, [loadRules, userId, data]);
 
   const flash = (text, error = false) => {
     setStatusMsg({ text, error });

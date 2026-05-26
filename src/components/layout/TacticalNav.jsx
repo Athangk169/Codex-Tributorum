@@ -11,6 +11,7 @@ import React from 'react';
 const NAV_STYLES = `
   .tac-nav-btn {
     flex:          1;
+    min-width:     95px;           /* prevent tabs collapsing too narrow with 7 items */
     background:    rgba(1, 8, 3, 0.85);
     border:        1px solid var(--border);
     border-top:    2px solid transparent;
@@ -57,12 +58,13 @@ const NAV_STYLES = `
 
 export const TacticalNav = ({ activeSlide, setActiveSlide }) => {
   const navItems = [
-    { id: 'overview',  label: 'OVERVIEW'  },
-    { id: 'ledger',    label: 'LEDGER'    },
-    { id: 'bank',      label: 'BANK'      },
-    { id: 'auspex',    label: 'AUSPEX'    },
-    { id: 'liquidity', label: 'LIQUIDITY' },
-    { id: 'holo',      label: 'RECON'     },
+    { id: 'overview',     label: 'OVERVIEW'     },
+    { id: 'ledger',       label: 'LEDGER'       },
+    { id: 'bank',         label: 'BANK'         },
+    { id: 'auspex',       label: 'AUSPEX'       },
+    { id: 'liquidity',    label: 'LIQUIDITY'    },
+    { id: 'obligations',  label: 'OBLIGATIONS'  },
+    { id: 'holo',         label: 'RECON'        },
   ];
 
   return (
@@ -74,11 +76,16 @@ export const TacticalNav = ({ activeSlide, setActiveSlide }) => {
         padding:       '8px 0',
         background:    'linear-gradient(180deg, #060002 0%, #04000a 100%)',
         borderBottom:  '2px solid var(--border)',
-        boxShadow:     '0 2px 8px rgba(180, 20, 0, 0.25)',   /* BA crimson seam */
+        boxShadow:     '0 2px 8px rgba(180, 20, 0, 0.25)',
         height:        '47px',
         flexShrink:    0,
         alignItems:    'center',
-      }}>
+        overflowX:     'auto',
+        overflowY:     'hidden',
+        scrollbarWidth:'none',          /* hide scrollbar — swipe to navigate */
+      }}
+      onWheel={e => { e.currentTarget.scrollLeft += e.deltaY; }}  /* mouse wheel scrolls horizontally */
+      >
         {navItems.map((item) => (
           <button
             key={item.id}

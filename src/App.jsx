@@ -32,6 +32,7 @@ import AuspexSlide from './components/slides/AuspexSlide';
 import LiquiditySlide from './components/slides/LiquiditySlide';
 import HoloSlide from './components/slides/HoloSlide';
 import BankAccountsSlide from './components/slides/BankAccountsSlide';
+import ObligationsSlide from './components/slides/ObligationsSlide';
 
 function App() {
   const isMobile = useIsMobile();
@@ -103,7 +104,8 @@ function App() {
         {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   userId={credentials?.username} />}
         {activeSlide === 'liquidity' && <LiquiditySlide   data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
         {activeSlide === 'holo'      && <HoloSlide        data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
-        {activeSlide === 'bank'      && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+        {activeSlide === 'bank'        && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+        {activeSlide === 'obligations' && <ObligationsSlide  data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
       </main>
 
       <SystemFooter user={credentials?.username} />

@@ -274,12 +274,14 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   const completeAuditRitual = async () => {
     if (!selectedAccount) return;
+    const auditedAt = new Date().toISOString();
     await AccountEngine.updateAccount(selectedAccount._id, {
-      last_audited_date: new Date().toISOString()
+      last_audited_date: auditedAt
     }, dbMetadata, userId);
 
     setAuditProgress(0);
     setIsAuditing(false);
+    setSelectedAccount(prev => prev ? { ...prev, last_audited_date: auditedAt } : prev);
     setSealStamped(true);
     setTimeout(() => setSealStamped(false), 2800);
     loadData();
@@ -375,8 +377,8 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
           transition: all 0.2s; user-select: none;
         }
         .rite-btn:active { transform: scale(0.98); }
-        .rite-btn::before {
-          content: ''; position: absolute; top: 0; left: 0; bottom: 0;
+        .rite-fill {
+          position: absolute; top: 0; left: 0; bottom: 0;
           background: rgba(201,168,76,0.3); z-index: 0; transition: width 0.1s linear;
         }
         .rite-content { position: relative; z-index: 1; }
@@ -384,27 +386,27 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
         /* Purity Seal */
       @keyframes sealStamp {
         0% {
-          transform: translateY(-40px) scale(1.5);
+          transform: translateY(-42px) scale(1.45) rotate(-3deg);
           opacity: 0;
           filter: brightness(4) saturate(0);
         }
         18% {
-          transform: translateY(4px) scale(1);
+          transform: translateY(5px) scale(0.98) rotate(1deg);
           opacity: 1;
           filter: brightness(2) saturate(1.4) contrast(1.2);
         }
         28% {
-          transform: translateY(0) scale(1.03);
+          transform: translateY(0) scale(1.04) rotate(0deg);
           opacity: 1;
           filter: brightness(1.3) saturate(1.2) contrast(1.1);
         }
         70% {
-          transform: translateY(0) scale(1.03);
+          transform: translateY(0) scale(1.04) rotate(0deg);
           opacity: 1;
         }
         100% {
-          transform: translateY(4px) scale(1);
-          opacity: 0.5s;
+          transform: translateY(3px) scale(1) rotate(0deg);
+          opacity: 0;
           filter: brightness(1) contrast(1.05);
         }
       }
@@ -413,6 +415,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
         animation: sealStamp 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         mix-blend-mode: screen;
         text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+        transform-origin: center center;
       }
 
       @keyframes sealPulse {
@@ -525,12 +528,14 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
               {/* Stamp effect on ritual completion */}
               {sealStamped && (
-                <div className="seal-stamp" style={{
+                <div style={{
                   position: 'absolute', top: '50%', left: '50%',
                   transform: 'translate(-50%, -60%)',
                   width: '180px', height: 'auto', zIndex: 50, pointerEvents: 'none',
                 }}>
-                  <img src="/purity_seal.jpg" alt="" style={{ width: '100%', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(201,168,76,0.8))' }} />
+                  <div className="seal-stamp">
+                    <img src="/purity_seal.jpg" alt="" style={{ width: '100%', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(201,168,76,0.8))' }} />
+                  </div>
                 </div>
               )}
 
@@ -597,9 +602,9 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                     onTouchStart={startAuditRitual}
                     onTouchEnd={stopAuditRitual}
                   >
-                    <style>{`.rite-btn::before { width: ${auditProgress}% !important; }`}</style>
+                    <span className="rite-fill" style={{ width: `${auditProgress}%` }} />
                     <span className="rite-content">
-                      {isAuditing ? '[ APPLYYING PURITY SEAL... ]' : '[ HOLD TO INITIATE RITE OF RECONCILIATION ]'}
+                      {isAuditing ? '[ APPLYING PURITY SEAL... ]' : '[ HOLD TO INITIATE RITE OF RECONCILIATION ]'}
                     </span>
                   </button>
                 </div>

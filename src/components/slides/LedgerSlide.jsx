@@ -1,5 +1,5 @@
 // src/components/slides/LedgerSlide.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { CategorizationEngine, AREngine } from '../../utils/engine';
 
 // ── CryptoPlaceholder ─────────────────────────────────────────
@@ -154,16 +154,25 @@ const LedgerServoSkull = ({ x, y, status }) => {
 };
 
 // ── LedgerSlide ───────────────────────────────────────────────
+const OBLIGATION_CATEGORIES = ['Loan Drawdown', 'Loan Payment', 'EMI Payment'];
+const isLoanCategory = (category) => category === 'Loan Drawdown' || category === 'Loan Payment';
+const isEmiCategory = (category) => category === 'EMI Payment';
+const isObligationCategory = (category) => isLoanCategory(category) || isEmiCategory(category);
+
 const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
-  const transactions       = data?.transactions       || [];
-  const accounts           = data?.accounts           || [];
-  const cards              = data?.cards              || [];
-  const positiveCategories = data?.positiveCategories || [];
-  const neutralCategories  = data?.neutralCategories  || [];
+  const transactions       = useMemo(() => data?.transactions       || [], [data?.transactions]);
+  const accounts           = useMemo(() => data?.accounts           || [], [data?.accounts]);
+  const cards              = useMemo(() => data?.cards              || [], [data?.cards]);
+  const expenseCategories  = useMemo(() => data?.expenseCategories  || [], [data?.expenseCategories]);
+  const positiveCategories = useMemo(() => data?.positiveCategories || [], [data?.positiveCategories]);
+  const neutralCategories  = useMemo(() => data?.neutralCategories  || [], [data?.neutralCategories]);
+  const loans              = useMemo(() => data?.obligations?.loans || [], [data?.obligations?.loans]);
+  const emis               = useMemo(() => data?.obligations?.emis  || [], [data?.obligations?.emis]);
   const allCategories = [
-    ...(data?.expenseCategories  || []),
-    ...(data?.positiveCategories || []),
-    ...(data?.neutralCategories  || []),
+    ...expenseCategories,
+    ...positiveCategories,
+    ...neutralCategories,
+    ...OBLIGATION_CATEGORIES,
   ];
 
   // All previously used AR tags — drives datalist autocomplete
@@ -177,6 +186,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     description: '', amount: '', method: '',
     category: 'Uncategorized',
     isReimbursable: false, reimbursementTag: '', notes: '',
+    loanId: '', emiId: '', paidBy: '',
   };
 
   const [formData,      setFormData]      = useState(blankForm);
@@ -185,13 +195,134 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const [isDescFocused, setIsDescFocused] = useState(false);
   const [isAmtFocused,  setIsAmtFocused]  = useState(false);
 
-  // Seed method when accounts load
-  useEffect(() => {
-    if (!formData.method && accounts.length > 0) {
-      const firstSubId = accounts[0]._id?.split(':').pop() || '';
-      setFormData(prev => ({ ...prev, method: firstSubId }));
+  const resolveSubAccountInput = (raw) => {
+    const value = (raw || '').trim();
+    if (!value) return '';
+    if (value === 'cash_main' || value === 'external') return value;
+
+    const byId = [...accounts, ...cards].find(item => {
+      const subId = item._id?.split(':').pop();
+      return item._id === value || subId === value;
+    });
+    if (byId) return byId._id?.split(':').pop() || value;
+
+    const byName = [...accounts, ...cards].find(item =>
+      (item.name || '').toLowerCase() === value.toLowerCase()
+    );
+    return byName?._id?.split(':').pop() || value;
+  };
+
+  const getFallbackMethod = () =>
+    accounts[0]?._id?.split(':').pop()
+    || cards[0]?._id?.split(':').pop()
+    || 'cash_main';
+
+  const getLoanAccountMethod = (loan, category) => {
+    if (!loan) return '';
+    const source = category === 'Loan Payment'
+      ? (loan.emi_account || loan.debit_account)
+      : (loan.debit_account || loan.emi_account);
+    return resolveSubAccountInput(source);
+  };
+
+  const getEmiAccountMethod = (emi) => resolveSubAccountInput(emi?.account);
+
+  const selectedLoan = loans.find(loan => loan._id === formData.loanId);
+  const selectedEmi  = emis.find(emi => emi._id === formData.emiId);
+
+  const resolveLoanLabel = (loanId) => {
+    const loan = loans.find(item => item._id === loanId);
+    return loan?.name || loanId?.split(':').pop() || 'UNKNOWN LOAN';
+  };
+
+  const resolveEmiLabel = (emiId) => {
+    const emi = emis.find(item => item._id === emiId);
+    return emi?.name || emiId?.split(':').pop() || 'UNKNOWN EMI';
+  };
+
+  const isPaidByUser = (paidBy) => {
+    const payer = (paidBy || '').trim();
+    if (!payer) return true;
+    return payer.toLowerCase() === (user || '').toLowerCase();
+  };
+
+  const calculateLoanPaymentComponents = (loan, amount) => {
+    const absAmount = Math.abs(Number(amount) || 0);
+    if (!loan || absAmount <= 0) return { principal: 0, interest: absAmount };
+    const phase = loan.balance?.phase || loan.phase;
+    if (phase !== 'repayment' || Number(loan.emi || 0) <= 0) {
+      return { principal: 0, interest: absAmount };
     }
-  }, [accounts]);
+
+    const currentInterestDue = Number(loan.balance?.outstandingInterest ?? loan.balance?.nextInterestDue ?? 0);
+    const interest = Math.min(absAmount, Math.max(0, currentInterestDue));
+
+    return {
+      principal: Math.max(0, absAmount - interest),
+      interest,
+    };
+  };
+
+  const calculateEmiPaymentComponents = (emi, amount, existingTxn = null) => {
+    const absAmount = Math.abs(Number(amount) || 0);
+    if (!emi || absAmount <= 0) return { principal: 0, interest: 0 };
+
+    const oldPrincipal = existingTxn?.emi_id === emi._id && existingTxn?.category === 'EMI Payment'
+      ? Number(existingTxn.principal_component || 0)
+      : 0;
+    const financedAmount = Math.max(0, Number(emi.financed_amount ?? (
+      Number(emi.total_amount || 0) - Number(emi.down_payment || 0)
+    )));
+    const liveOutstanding = Number(emi.balance?.outstanding || 0);
+    const outstanding = (liveOutstanding > 0 ? liveOutstanding : financedAmount) + oldPrincipal;
+    const totalPayable = Math.max(
+      Number(emi.emi_amount || 0) * Number(emi.tenure_months || 0),
+      financedAmount
+    );
+    const principalRatio = totalPayable > 0 ? financedAmount / totalPayable : 1;
+    const principal = Math.min(outstanding, absAmount * principalRatio);
+
+    return {
+      principal,
+      interest: Math.max(0, absAmount - principal),
+    };
+  };
+
+  const markInvalid = () => {
+    setSkullState(prev => ({ ...prev, status: 'error' }));
+    setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
+  };
+
+  const syncLoanDrawdownMetadata = async (oldTxn, newTxn) => {
+    if (!dbMetadata) return;
+
+    const deltas = new Map();
+    const addDelta = (loanId, delta) => {
+      if (!loanId || !delta) return;
+      deltas.set(loanId, (deltas.get(loanId) || 0) + delta);
+    };
+
+    if (oldTxn?.category === 'Loan Drawdown') {
+      addDelta(oldTxn.loan_id, -Math.abs(Number(oldTxn.amount || 0)));
+    }
+    if (newTxn?.category === 'Loan Drawdown') {
+      addDelta(newTxn.loan_id, Math.abs(Number(newTxn.amount || 0)));
+    }
+
+    for (const [loanId, delta] of deltas) {
+      if (!delta) continue;
+      try {
+        const loan = await dbMetadata.get(loanId);
+        await dbMetadata.put({
+          ...loan,
+          disbursed_amount: Math.max(0, Number(loan.disbursed_amount || 0) + delta),
+          updated: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('Loan drawdown sync failed:', err);
+      }
+    }
+  };
 
   // Skull state
   const idleDock = { x: 380, y: 8 };
@@ -229,8 +360,44 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     const { name, value } = e.target;
     setFormData(prev => {
       const next = { ...prev, [name]: value };
-      if (name === 'category' && value === 'Reimbursement Received')
-        next.isReimbursable = true;
+      if (name === 'category') {
+        if (value === 'Reimbursement Received') next.isReimbursable = true;
+        if (isObligationCategory(value)) {
+          next.isReimbursable = false;
+          next.reimbursementTag = '';
+        }
+        if (!isLoanCategory(value)) {
+          next.loanId = '';
+          next.paidBy = '';
+        }
+        if (!isEmiCategory(value)) next.emiId = '';
+        if (isLoanCategory(value) && !next.loanId && loans.length > 0) {
+          next.loanId = loans[0]._id;
+        }
+        if (isEmiCategory(value) && !next.emiId && emis.length > 0) {
+          next.emiId = emis[0]._id;
+        }
+      }
+
+      const category = name === 'category' ? value : next.category;
+
+      if (isLoanCategory(category) && (name === 'category' || name === 'loanId')) {
+        const loan = loans.find(item => item._id === next.loanId);
+        const method = getLoanAccountMethod(loan, category);
+        if (method) next.method = method;
+        if (category === 'Loan Payment') {
+          if (!next.amount && loan?.emi) next.amount = String(loan.emi);
+          if (!next.paidBy) next.paidBy = user || '';
+        }
+      }
+
+      if (isEmiCategory(category) && (name === 'category' || name === 'emiId')) {
+        const emi = emis.find(item => item._id === next.emiId);
+        const method = getEmiAccountMethod(emi);
+        if (method) next.method = method;
+        if (!next.amount && emi?.emi_amount) next.amount = String(emi.emi_amount);
+      }
+
       return next;
     });
   };
@@ -271,6 +438,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const resolveMethodLabel = (subId) => {
     if (!subId) return 'UNKNOWN';
     if (subId === 'cash_main') return 'CASH';
+    if (subId === 'external') return 'EXTERNAL';
     const card = cards.find(c => c._id?.split(':').pop() === subId);
     if (card) return card.name.toUpperCase();
     const acc = accounts.find(a => a._id?.split(':').pop() === subId);
@@ -284,6 +452,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   };
 
   const getTransactionType = (category) => {
+    if (category === 'Loan Drawdown') return 'income';
     if (positiveCategories.includes(category)) return 'income';
     if (neutralCategories.includes(category))  return 'neutral';
     return 'expense';
@@ -292,24 +461,59 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const handleInscribe = async (e) => {
     e.preventDefault();
     if (!formData.description || !formData.amount || Number(formData.amount) <= 0) {
-      setSkullState(prev => ({ ...prev, status: 'error' }));
-      setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
+      markInvalid();
       return;
     }
     if (formData.isReimbursable && !formData.reimbursementTag.trim()) {
-      setSkullState(prev => ({ ...prev, status: 'error' }));
-      setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
+      markInvalid();
+      return;
+    }
+    if (isLoanCategory(formData.category) && !formData.loanId) {
+      markInvalid();
+      return;
+    }
+    if (isEmiCategory(formData.category) && !formData.emiId) {
+      markInvalid();
       return;
     }
 
 
-    const subId       = formData.method || accounts[0]?._id?.split(':').pop() || 'bank_hdfc';
-    const actType     = resolveAccountType(subId);
-    const rawAmt      = Number(formData.amount);
-    const isIncome    = positiveCategories.includes(formData.category);
-    const signedAmt   = isIncome ? Math.abs(rawAmt) : -Math.abs(rawAmt);
-    const suffix      = Math.random().toString(36).substring(2, 10);
-    const txnId       = isEditing || `txn:${user}:${formData.date}:${suffix}`;
+    let existingTxn = null;
+    if (isEditing && dbTransactions) {
+      try {
+        existingTxn = await dbTransactions.get(isEditing);
+      } catch (err) {
+        console.error('EDIT LOAD FAILED:', err);
+        markInvalid();
+        return;
+      }
+    }
+
+    const rawAmt        = Number(formData.amount);
+    const category      = formData.category;
+    const loan          = loans.find(item => item._id === formData.loanId);
+    const emi           = emis.find(item => item._id === formData.emiId);
+    const paidBy        = (formData.paidBy || '').trim() || user;
+    const isExternalPmt = category === 'Loan Payment' && !isPaidByUser(paidBy);
+    const fallback      = getFallbackMethod();
+    const requestedSub  = resolveSubAccountInput(formData.method);
+    const subId         = isExternalPmt
+      ? 'external'
+      : requestedSub
+        || (isLoanCategory(category) ? getLoanAccountMethod(loan, category) : '')
+        || (isEmiCategory(category) ? getEmiAccountMethod(emi) : '')
+        || fallback;
+    const actType       = isExternalPmt ? 'External' : resolveAccountType(subId);
+    const isIncome      = positiveCategories.includes(category) || category === 'Loan Drawdown';
+    const signedAmt     = isIncome ? Math.abs(rawAmt) : -Math.abs(rawAmt);
+    const suffix        = Math.random().toString(36).substring(2, 10);
+    const txnId         = isEditing || `txn:${user}:${formData.date}:${suffix}`;
+    const loanParts     = category === 'Loan Payment'
+      ? calculateLoanPaymentComponents(loan, rawAmt)
+      : null;
+    const emiParts      = category === 'EMI Payment'
+      ? calculateEmiPaymentComponents(emi, rawAmt, existingTxn)
+      : null;
 
     const newTxn = {
       _id:               txnId,
@@ -318,24 +522,30 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       date:              formData.date,
       amount:            signedAmt,
       description:       formData.description,
-      category:          formData.category,
+      category,
       account_type:      actType,
       sub_account:       subId,
       reimbursement_tag: formData.isReimbursable
                            ? (formData.reimbursementTag.trim() || 'untagged')
                            : null,
       notes:             formData.notes.trim() || null,
+      // Explicit nulls clear stale obligation tags when editing entries.
+      loan_id:           isLoanCategory(category) ? formData.loanId : null,
+      emi_id:            isEmiCategory(category) ? formData.emiId : null,
+      paid_by:           category === 'Loan Payment' ? paidBy : null,
+      principal_component: loanParts ? loanParts.principal : emiParts ? emiParts.principal : null,
+      interest_component:  loanParts ? loanParts.interest  : emiParts ? emiParts.interest  : null,
       created_at:        new Date().toISOString(),
     };
 
     if (dbTransactions) {
       try {
         if (isEditing) {
-          const existing = await dbTransactions.get(isEditing);
-          await dbTransactions.put({ ...existing, ...newTxn, _rev: existing._rev });
+          await dbTransactions.put({ ...existingTxn, ...newTxn, _rev: existingTxn._rev });
         } else {
           await dbTransactions.put(newTxn);
         }
+        await syncLoanDrawdownMetadata(existingTxn, newTxn);
         setLastAddedId(txnId);
       } catch (err) {
         console.error('◈ INSCRIBE FAILED:', err);
@@ -363,16 +573,21 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       return formData.method;
     })();
 
+    const category = tx.category || 'Uncategorized';
+
     setFormData({
       date:             tx.date || new Date().toISOString().split('T')[0],
       description:      tx.description || '',
       amount:           Math.abs(tx.amount || 0).toString(),
       method:           subId,
-      category:         tx.category || 'Uncategorized',
-      isReimbursable:   !!(tx.reimbursement_tag || tx.is_reimbursable),
+      category,
+      isReimbursable:   !isObligationCategory(category) && !!(tx.reimbursement_tag || tx.is_reimbursable),
       reimbursementTag: (tx.reimbursement_tag && tx.reimbursement_tag !== 'untagged')
                           ? tx.reimbursement_tag : '',
       notes:            tx.notes || '',
+      loanId:           tx.loan_id || '',
+      emiId:            tx.emi_id || '',
+      paidBy:           tx.paid_by || user || '',
     });
     setIsEditing(tx._id);
   };
@@ -383,6 +598,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       try {
         const doc = await dbTransactions.get(id);
         await dbTransactions.remove(doc);
+        await syncLoanDrawdownMetadata(doc, null);
       } catch (err) { console.error('◈ PURGE FAILED:', err); }
     }
   };
@@ -508,7 +724,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
             <div>
               <label className="kpi-lbl">TRANSACTION METHOD</label>
               <select
-                name="method" value={formData.method}
+                name="method" value={formData.method || getFallbackMethod()}
                 onChange={handleInputChange} className="mech-select"
                 onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
                 onBlur={() => aimSkull(null)}
@@ -547,6 +763,82 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
               </select>
             </div>
 
+            {isLoanCategory(formData.category) && (
+              <div
+                className="reimb-tag-row"
+                style={{
+                  gridColumn: '1 / -1',
+                  display: 'grid',
+                  gridTemplateColumns: formData.category === 'Loan Payment' ? '1.3fr 1fr' : '1fr',
+                  gap: '15px'
+                }}
+              >
+                <div>
+                  <label className="kpi-lbl">OBLIGATION TARGET // LOAN</label>
+                  <select
+                    name="loanId" value={formData.loanId}
+                    onChange={handleInputChange} className="mech-select" required
+                    onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                    onBlur={() => aimSkull(null)}
+                    style={!formData.loanId ? { borderColor: 'var(--ba-crimson)', boxShadow: 'inset 0 0 8px rgba(204,34,0,0.2)' } : {}}
+                  >
+                    <option value="">-- SELECT LOAN --</option>
+                    {loans.map(loan => (
+                      <option key={loan._id} value={loan._id}>
+                        {loan.name} // {loan.phase?.toUpperCase() || 'ACTIVE'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {formData.category === 'Loan Payment' && (
+                  <div>
+                    <label className="kpi-lbl">PAYER IDENT</label>
+                    <input
+                      type="text" name="paidBy" value={formData.paidBy}
+                      onChange={handleInputChange}
+                      placeholder={user || 'SELF'}
+                      className="mech-input"
+                      onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                      onBlur={() => aimSkull(null)}
+                    />
+                  </div>
+                )}
+
+                {selectedLoan && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>
+                    {selectedLoan.phase?.toUpperCase() || 'ACTIVE'} // OUTSTANDING {Math.round(selectedLoan.balance?.outstanding ?? selectedLoan.disbursed_amount ?? 0).toLocaleString()} // EMI {Math.round(selectedLoan.emi || 0).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isEmiCategory(formData.category) && (
+              <div className="reimb-tag-row" style={{ gridColumn: '1 / -1' }}>
+                <label className="kpi-lbl">OBLIGATION TARGET // EMI PURCHASE</label>
+                <select
+                  name="emiId" value={formData.emiId}
+                  onChange={handleInputChange} className="mech-select" required
+                  onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
+                  onBlur={() => aimSkull(null)}
+                  style={!formData.emiId ? { borderColor: 'var(--ba-crimson)', boxShadow: 'inset 0 0 8px rgba(204,34,0,0.2)' } : {}}
+                >
+                  <option value="">-- SELECT EMI --</option>
+                  {emis.map(emi => (
+                    <option key={emi._id} value={emi._id}>
+                      {emi.name} // {Math.round(emi.emi_amount || 0).toLocaleString()} / MO
+                    </option>
+                  ))}
+                </select>
+                {selectedEmi && (
+                  <div style={{ marginTop: '6px', fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>
+                    REMAINING {selectedEmi.balance?.monthsRemaining ?? selectedEmi.tenure_months} // OUTSTANDING {Math.round(selectedEmi.balance?.outstanding ?? selectedEmi.financed_amount ?? 0).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isObligationCategory(formData.category) && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <label className="kpi-lbl">RECOVERY DIRECTIVE</label>
               <div
@@ -580,8 +872,9 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                 >[ RECOVERY ]</button>
               </div>
             </div>
+            )}
 
-            {formData.isReimbursable && (
+            {formData.isReimbursable && !isObligationCategory(formData.category) && (
               <div className="reimb-tag-row" style={{ gridColumn: '1 / -1' }}>
                 <label className="kpi-lbl">RECOVERY TARGET // WHO OWES YOU</label>
                 <input
@@ -678,6 +971,21 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                             {tx.reimbursement_tag && (
                               <span style={{ color: 'var(--border-hi)', marginLeft: '6px' }}>
                                 [R: {tx.reimbursement_tag}]
+                              </span>
+                            )}
+                            {tx.loan_id && (
+                              <span style={{ color: 'var(--ba-gold)', marginLeft: '6px' }}>
+                                [L: {resolveLoanLabel(tx.loan_id)}]
+                              </span>
+                            )}
+                            {tx.emi_id && (
+                              <span style={{ color: 'var(--ba-gold)', marginLeft: '6px' }}>
+                                [EMI: {resolveEmiLabel(tx.emi_id)}]
+                              </span>
+                            )}
+                            {(tx.category === 'Loan Payment' || tx.category === 'EMI Payment') && (tx.principal_component || tx.interest_component) && (
+                              <span style={{ color: 'var(--ba-gold-mute)', marginLeft: '6px' }}>
+                                [P: {Math.round(tx.principal_component || 0).toLocaleString()} / I: {Math.round(tx.interest_component || 0).toLocaleString()}]
                               </span>
                             )}
                             {tx.notes && (

@@ -22,27 +22,50 @@ const ScrambleText = ({ text, speed = 60, step = 0.08 }) => {
   return <>{display}</>;
 };
 
-// ── Persistent skull behavior state ───────────────────────────
-let _skullt      = 0;        
-let _skullMode   = 'patrol'; 
-let _skullFrames = 200;      
-let _skullTh     = 0;        
-let _skullPh     = 80;       
-
-const _pickMode = () => {
-  const roll = Math.random();
-  if      (roll < 0.12) return { mode: 'scan',   frames: 80  + Math.floor(Math.random() * 60)  };  
-  else if (roll < 0.28) return { mode: 'focus',  frames: 140 + Math.floor(Math.random() * 100) };  
-  else if (roll < 0.33) return { mode: 'glitch', frames: 16  + Math.floor(Math.random() * 14)  };  
-  else                  return { mode: 'patrol', frames: 320 + Math.floor(Math.random() * 280) };  
-};
-
-// ── ServoSkullOverview ────────────────────────────────────────
-const ServoSkullOverview = ({ syncLed, globalAuditState }) => {
+// ── Autonomous Servo Skull ────────────────────────────────────
+const ServoSkullOverview = ({ syncLed, globalAuditState, slideRef, dockRef }) => {
   const containerRef = useRef(null);
   const mvRef        = useRef(null);
-  const prevModeRef  = useRef(_skullMode);
-  const [skullMode, setSkullMode] = useState(_skullMode);
+  const activeTargetRef = useRef(null);
+  const [skullMode, setSkullMode] = useState('dock');
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [beamSide, setBeamSide] = useState('left');
+
+  const moveToElement = useCallback((element, mode = 'scan') => {
+    if (!element || !slideRef.current) return;
+    const slideRect = slideRef.current.getBoundingClientRect();
+    const elRect = element.getBoundingClientRect();
+    const scanFromRight = Math.random() > 0.5;
+    setBeamSide(scanFromRight ? 'left' : 'right');
+    const rawX = mode === 'dock'
+      ? elRect.left - slideRect.left
+      : scanFromRight
+        ? elRect.right - slideRect.left + 12
+        : elRect.left - slideRect.left - 78;
+    const rawY = mode === 'dock'
+      ? elRect.top - slideRect.top
+      : elRect.top - slideRect.top + Math.max(0, (elRect.height - 68) / 2);
+
+    activeTargetRef.current?.classList.remove('ov-skull-active');
+    if (mode === 'dock') {
+      activeTargetRef.current = null;
+    } else {
+      element.classList.add('ov-skull-active');
+      activeTargetRef.current = element;
+    }
+
+    setSkullMode(mode);
+    setPosition({
+      x: Math.max(4, Math.min(slideRect.width - 72, rawX)),
+      y: Math.max(4, Math.min(slideRect.height - 72, rawY)),
+    });
+  }, [slideRef]);
+
+  const moveToDock = useCallback(() => {
+    activeTargetRef.current?.classList.remove('ov-skull-active');
+    activeTargetRef.current = null;
+    moveToElement(dockRef.current, 'dock');
+  }, [dockRef, moveToElement]);
 
   useEffect(() => {
     import('@google/model-viewer').catch(() => {});
@@ -54,7 +77,7 @@ const ServoSkullOverview = ({ syncLed, globalAuditState }) => {
     mv.setAttribute('disable-zoom', '');
     mv.setAttribute('interaction-prompt', 'none');
     Object.assign(mv.style, {
-      width: '68px', height: '68px',
+      width: '100%', height: '100%',
       backgroundColor: 'transparent',
       '--progress-bar-color': 'transparent',
       '--progress-bar-height': '0px',
@@ -86,58 +109,109 @@ const ServoSkullOverview = ({ syncLed, globalAuditState }) => {
   }, [syncLed, globalAuditState, skullMode]);
 
   useEffect(() => {
+    let t = 0;
     const iv = setInterval(() => {
       if (!mvRef.current) return;
 
-      _skullt      += 0.018;
-      _skullFrames -= 1;
-
-      if (_skullFrames <= 0) {
-        const next = _pickMode();
-        _skullMode   = next.mode;
-        _skullFrames = next.frames;
-        if (next.mode === 'scan' || next.mode === 'focus') {
-          _skullTh = (Math.random() - 0.5) * (next.mode === 'scan' ? 130 : 80);
-          _skullPh = 65 + Math.random() * 30;
-        }
-        if (_skullMode !== prevModeRef.current) {
-          prevModeRef.current = _skullMode;
-          setSkullMode(_skullMode);
-        }
-      }
+      t += 0.018;
 
       let theta, phi;
-      switch (_skullMode) {
-        case 'patrol':
-          theta = Math.sin(_skullt) * 38;
-          phi   = 80 + Math.sin(_skullt * 0.4 + 1.2) * 7;
-          break;
+      switch (skullMode) {
         case 'scan':
-          theta = _skullTh + Math.sin(_skullt * 4.5) * 6;
-          phi   = _skullPh + Math.sin(_skullt * 3.2 + 0.9) * 4;
+          theta = (beamSide === 'right' ? -125 : 125) + Math.sin(t * 1.6) * 7;
+          phi   = 76 + Math.sin(t * 1.2 + 0.9) * 4;
           break;
         case 'focus':
-          theta = _skullTh + Math.sin(_skullt * 0.8) * 2;
-          phi   = _skullPh + Math.sin(_skullt * 0.5) * 1.5;
+          theta = (beamSide === 'right' ? -145 : 145) + Math.sin(t * 0.8) * 4;
+          phi   = 74 + Math.sin(t * 0.5) * 2;
           break;
         case 'glitch':
           theta = (Math.random() - 0.5) * 180;
           phi   = 55 + Math.random() * 50;
           break;
         default:
-          theta = Math.sin(_skullt) * 38;
-          phi   = 80 + Math.sin(_skullt * 0.4 + 1.2) * 7;
+          theta = Math.sin(t) * 38;
+          phi   = 80 + Math.sin(t * 0.4 + 1.2) * 7;
       }
 
       mvRef.current.setAttribute('camera-orbit', `${theta}deg ${phi}deg 2.8m`);
     }, 50);
 
     return () => clearInterval(iv);
-  }, []);
+  }, [skullMode]);
+
+  useEffect(() => {
+    moveToDock();
+    const handleResize = () => moveToDock();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [moveToDock]);
+
+  useEffect(() => {
+    let timeoutId;
+    let cancelled = false;
+
+    const chooseNextAction = () => {
+      if (cancelled || !slideRef.current) return;
+      const targets = [...slideRef.current.querySelectorAll('.ov-target-hover, .ov-relay-row, .ov-ar-row, .ov-bar-track')]
+        .filter(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+
+      if (!targets.length) {
+        moveToDock();
+        timeoutId = setTimeout(chooseNextAction, 5000);
+        return;
+      }
+
+      const scanCount = 2 + Math.floor(Math.random() * 2);
+      let step = 0;
+      const usedTargets = new Set();
+
+      const scanNextTarget = () => {
+        if (cancelled) return;
+        const available = targets.filter(target => !usedTargets.has(target));
+        const pool = available.length > 0 ? available : targets;
+        const target = pool[Math.floor(Math.random() * pool.length)];
+        usedTargets.add(target);
+        moveToElement(target, Math.random() < 0.1 ? 'glitch' : 'scan');
+        step += 1;
+
+        if (step < scanCount) {
+          timeoutId = setTimeout(scanNextTarget, 9800 + Math.random() * 2200);
+          return;
+        }
+
+        timeoutId = setTimeout(() => {
+          if (cancelled) return;
+          if (Math.random() < 0.72) moveToDock();
+          timeoutId = setTimeout(chooseNextAction, 9000 + Math.random() * 6000);
+        }, 9800 + Math.random() * 2600);
+      };
+
+      scanNextTarget();
+    };
+
+    timeoutId = setTimeout(chooseNextAction, 2200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      activeTargetRef.current?.classList.remove('ov-skull-active');
+    };
+  }, [moveToDock, moveToElement, slideRef]);
 
   return (
-    <div style={{ position: 'relative', width: '68px', height: '68px', flexShrink: 0 }}>
-      <div ref={containerRef} style={{ width: '68px', height: '68px' }} />
+    <div style={{
+      position: 'absolute', top: 0, left: 0,
+      width: '68px', height: '68px',
+      transform: `translate(${position.x}px, ${position.y}px)`,
+      transition: 'transform 7.5s cubic-bezier(0.16, 1, 0.3, 1)',
+      zIndex: 60,
+      pointerEvents: 'none',
+    }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {(skullMode === 'scan' || skullMode === 'focus') && <div className={`ov-skull-laser ${beamSide === 'right' ? 'to-right' : 'to-left'}`} />}
       <div style={{
         position: 'absolute', bottom: 2, left: 0, right: 0,
         display: 'flex', justifyContent: 'center', pointerEvents: 'none',
@@ -219,6 +293,10 @@ const OV_STYLES = `
     background: rgba(200,34,0,0.06);
     box-shadow: inset 0 0 15px rgba(200,34,0,0.12);
   }
+  .ov-skull-active {
+    background: rgba(204,34,0,0.07) !important;
+    box-shadow: inset 0 0 18px rgba(204,34,0,0.2), 0 0 14px rgba(204,34,0,0.1) !important;
+  }
   .glitch-crit { animation: scrapGlitch 2.5s infinite; }
 
   .ov-kpi-lbl { font-size: 9px; letter-spacing: 2px; color: var(--ba-gold-dim); text-transform: uppercase; margin-bottom: 4px; font-family: var(--mono); }
@@ -285,6 +363,46 @@ const OV_STYLES = `
   .ov-ar-tag { color: var(--ba-gold-dim); letter-spacing: 1px; text-transform: uppercase; }
   .ov-ar-amt { color: var(--border-hi); font-weight: bold; font-family: var(--mono); }
 
+  .skull-dock {
+    width: 68px; height: 68px; position: relative; flex-shrink: 0;
+    border: 1px dashed rgba(74,222,128,0.22);
+    background: radial-gradient(circle, rgba(74,222,128,0.08), transparent 65%);
+  }
+  .skull-dock-ring {
+    position: absolute; inset: 10px;
+    border: 1px solid rgba(201,168,76,0.26);
+    box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 10px rgba(74,222,128,0.08);
+  }
+  .ov-skull-sweep {
+    position: absolute; left: 50%; top: 55px; width: 2px; height: 90px;
+    background: #4ade80; box-shadow: 0 0 12px 2px #4ade80;
+    transform: translateX(-50%); z-index: -1;
+    animation: ovScanPulse 0.7s ease-in-out infinite alternate;
+  }
+  .ov-skull-laser {
+    position: absolute; top: 36px; width: 190px; height: 2px;
+    box-shadow: 0 0 10px 2px rgba(204,34,0,0.8);
+    z-index: -1;
+    animation: ovLaserPulse 0.55s ease-in-out infinite alternate;
+  }
+  .ov-skull-laser.to-left {
+    right: 45px;
+    background: linear-gradient(270deg, #cc2200 0%, rgba(204,34,0,0) 100%);
+    transform-origin: right center;
+  }
+  .ov-skull-laser.to-right {
+    left: 45px;
+    background: linear-gradient(90deg, #cc2200 0%, rgba(204,34,0,0) 100%);
+    transform-origin: left center;
+  }
+  @keyframes ovScanPulse {
+    from { height: 62px; opacity: 0.55; }
+    to   { height: 112px; opacity: 0.95; }
+  }
+  @keyframes ovLaserPulse {
+    from { opacity: 0.55; filter: brightness(0.85); }
+    to   { opacity: 1; filter: brightness(1.35); }
+  }
   .skull-bob { animation: skullBob 4s ease-in-out infinite; }
   .ov-noosphere-ttl::after { display: none; }
 
@@ -315,6 +433,8 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // ── Main ──────────────────────────────────────────────────────
 const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
+  const slideRef = useRef(null);
+  const skullDockRef = useRef(null);
   const txns         = data?.transactions       || [];
   const metrics      = data?.metrics            || {};
   const buckets      = data?.buckets            || {};
@@ -448,7 +568,13 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   return (
     <>
       <style>{OV_STYLES}</style>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px' }}>
+      <div ref={slideRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px', position: 'relative' }}>
+        <ServoSkullOverview
+          syncLed={syncLed}
+          globalAuditState={globalAuditState}
+          slideRef={slideRef}
+          dockRef={skullDockRef}
+        />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 0.8fr 0.8fr', gap: '10px', flexShrink: 0 }}>
           <div className="ov-panel ov-panel-hi ov-target-hover" style={{ padding: '14px 18px', position: 'relative' }}>
@@ -512,8 +638,8 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
             <div className="ov-panel" style={{ padding: '12px 14px' }}>
               <div className="ov-ttl">SYSTEM UPLINK</div>
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <div className="skull-bob">
-                  <ServoSkullOverview syncLed={syncLed} globalAuditState={globalAuditState} />
+                <div ref={skullDockRef} className="skull-dock">
+                  <div className="skull-dock-ring" />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div className="ov-row">

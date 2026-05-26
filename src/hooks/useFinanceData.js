@@ -4,7 +4,9 @@ import {
   FinanceEngine,
   CardEngine,
   AccountEngine,
-  AnalyticsEngine
+  AnalyticsEngine,
+  ObligationsEngine,
+  CategorizationEngine
 } from "../utils/engine";
 
 // ─────────────────────────────────────────────────────────────
@@ -100,13 +102,18 @@ export const useFinanceData = (credentials) => {
     });
 
     // ── Seeding: copy Sanguinius rules to a new user on first login ──
+    const categorySlug = (categoryName) =>
+      String(categoryName || '').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
     const seedInitialCategoriesFromAdmin = async (userId, metadataDB) => {
       if (!userId || userId === 'Sanguinius') return;
 
       try {
         const existingRules = await metadataDB.allDocs({ include_docs: true });
         const userRules = existingRules.rows.filter(r =>
-          r.doc.type === 'category_rule' && r.doc.user_id === userId
+          r.doc.type === 'finance:rule' &&
+          r.doc.user_id === userId &&
+          r.doc.is_system !== true
         );
 
         if (userRules.length > 0) return; // already seeded
@@ -115,39 +122,66 @@ export const useFinanceData = (credentials) => {
 
         // Copy category rules
         const adminRules = existingRules.rows.filter(r =>
-          r.doc.type === 'category_rule' && r.doc.user_id === 'Sanguinius'
+          (r.doc.type === 'finance:rule' || r.doc.type === 'category_rule') &&
+          (r.doc.user_id === 'Sanguinius' || !r.doc.user_id)
         );
 
         for (const rule of adminRules) {
           try {
-            const newRule  = { ...rule.doc };
-            delete newRule._rev;
-            newRule._id     = `${rule.doc._id}__${userId}`;
-            newRule.user_id = userId;
-            await metadataDB.put(newRule);
-          } catch (_) {}
+            const categoryName = rule.doc.category_name;
+            if (!categoryName) continue;
+
+            await metadataDB.put({
+              _id:           `finance:rule:${userId}:${categorySlug(categoryName)}`,
+              type:          'finance:rule',
+              user_id:       userId,
+              category_name: categoryName,
+              keywords:      [...new Set(rule.doc.keywords || [])],
+              is_active:     rule.doc.is_active !== false,
+              created:       new Date().toISOString(),
+              updated:       new Date().toISOString()
+            });
+          } catch {}
         }
 
         // Copy category type config
         try {
           let adminConfig;
           try {
-            adminConfig = await metadataDB.get('config_category_types_Sanguinius');
+            adminConfig = await metadataDB.get('finance:config:categories:Sanguinius');
           } catch {
-            adminConfig = await metadataDB.get('config_category_types');
+            try {
+              adminConfig = await metadataDB.get('config_category_types_Sanguinius');
+            } catch {
+              adminConfig = await metadataDB.get('config_category_types');
+            }
           }
 
-          await metadataDB.put({
-            _id:                 `config_category_types_${userId}`,
-            type:                'system_config',
+          const configId = `finance:config:categories:${userId}`;
+          const seededConfig = {
+            _id:                 configId,
+            type:                'finance:config',
             user_id:             userId,
-            positive_categories: [...(adminConfig.positive_categories || [])],
+            income_categories:   [...(adminConfig.income_categories || adminConfig.positive_categories || [])],
             neutral_categories:  [...(adminConfig.neutral_categories  || [])],
             expense_categories:  [...(adminConfig.expense_categories  || [])]
-          });
+          };
+
+          try {
+            const existingConfig = await metadataDB.get(configId);
+            await metadataDB.put({
+              ...existingConfig,
+              income_categories:  [...new Set([...(existingConfig.income_categories || []), ...seededConfig.income_categories])],
+              neutral_categories: [...new Set([...(existingConfig.neutral_categories || []), ...seededConfig.neutral_categories])],
+              expense_categories: [...new Set([...(existingConfig.expense_categories || []), ...seededConfig.expense_categories])],
+              updated:            new Date().toISOString()
+            });
+          } catch {
+            await metadataDB.put(seededConfig);
+          }
 
           console.log(`[SEED] Copied category config for ${userId}`);
-        } catch (_) {}
+        } catch {}
 
       } catch (err) {
         console.error("[SEED ERROR]", err);
@@ -159,11 +193,12 @@ export const useFinanceData = (credentials) => {
       console.log("◈ [DATA] Starting refresh");
       try {
         await seedInitialCategoriesFromAdmin(username, dbMetadata);
+        await CategorizationEngine.ensureObligationRules(dbMetadata, username);
 
         const now              = new Date();
         const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-        const [results, liveBalances, cardResults, accounts, cards, trends, arByTag] =
+        const [results, liveBalances, cardResults, accounts, cards, trends, arByTag, obligations] =
           await Promise.all([
             FinanceEngine.reconstructBalances(dbTransactions, dbMetadata, currentMonthPrefix, username),
             FinanceEngine.getBankAccountBalances(dbTransactions, dbMetadata, username),
@@ -172,6 +207,7 @@ export const useFinanceData = (credentials) => {
             AccountEngine.getCards(dbMetadata, username),
             AnalyticsEngine.getMonthlyTrends(dbTransactions, dbMetadata, username),
             FinanceEngine.getARByTag(dbTransactions, username),
+            ObligationsEngine.getSummary(dbMetadata, dbTransactions, username),
           ]);
 
         const aggregateDebt = (cardResults?.buckets || [])
@@ -185,21 +221,35 @@ export const useFinanceData = (credentials) => {
         try {
           let config;
           try {
-            config = await dbMetadata.get(`config_category_types_${username}`);
+            config = await dbMetadata.get(`finance:config:categories:${username}`);
           } catch {
-            config = await dbMetadata.get('config_category_types');
+            try {
+              config = await dbMetadata.get(`config_category_types_${username}`);
+            } catch {
+              config = await dbMetadata.get('config_category_types');
+            }
           }
 
-          positiveCategories = config.positive_categories || [];
+          positiveCategories = config.income_categories || config.positive_categories || [];
           neutralCategories  = config.neutral_categories  || [];
 
           const allMeta = await dbMetadata.allDocs({ include_docs: true });
           const allCategoryNames = allMeta.rows
             .map(r => r.doc)
-            .filter(d => d.type === 'category_rule' && (d.user_id === username || !d.user_id))
+            .filter(d =>
+              (d.type === 'finance:rule' || d.type === 'category_rule') &&
+              (d.user_id === username || !d.user_id) &&
+              d.is_active !== false
+            )
             .map(d => d.category_name);
 
-          const hardExclude = new Set(['Opening Balance', 'Account Closure']);
+          const hardExclude = new Set([
+            'Opening Balance',
+            'Account Closure',
+            'Loan Drawdown',
+            'Loan Payment',
+            'EMI Payment'
+          ]);
 
           expenseCategories = [...new Set(allCategoryNames)].filter(cat =>
             !hardExclude.has(cat) &&
@@ -223,7 +273,13 @@ export const useFinanceData = (credentials) => {
             positiveCategories,
             neutralCategories,
             trends:             trends || [],
-            arByTag:            arByTag || {}
+            arByTag:            arByTag || {},
+            obligations:        obligations || {
+              recurring: [], loans: [], emis: [],
+              totalMonthlyLoad: 0, recurringMonthlyLoad: 0,
+              emiMonthlyLoad: 0, loanMonthlyLoad: 0,
+              recurringStats: { paid: 0, pending: 0, overdue: 0, total: 0 }
+            }
           });
           setIsLoading(false);
           setError(null);
@@ -247,11 +303,25 @@ export const useFinanceData = (credentials) => {
     syncTxns.on('change', debouncedRefresh);
     syncMeta.on('change', debouncedRefresh);
 
+    // Local writes do not always emit replication changes while offline.
+    // Listen to the local databases too so add/edit/delete actions are visible
+    // immediately and then sync normally once the uplink returns.
+    const localTxnChanges = dbTransactions
+      .changes({ live: true, since: 'now' })
+      .on('change', debouncedRefresh)
+      .on('error', handleSyncError);
+    const localMetaChanges = dbMetadata
+      .changes({ live: true, since: 'now' })
+      .on('change', debouncedRefresh)
+      .on('error', handleSyncError);
+
     // Initial load — immediate, no debounce
     refreshData();
 
     return () => {
       clearTimeout(debounceTimer);
+      localTxnChanges.cancel();
+      localMetaChanges.cancel();
       syncTxns.cancel();
       syncMeta.cancel();
       syncInv.cancel();

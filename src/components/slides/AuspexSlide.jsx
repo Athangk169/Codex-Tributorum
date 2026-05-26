@@ -1,6 +1,76 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ScrambleText from '../shared/ScrambleText';
 
+const legacyManifestId = 'current_holdings';
+const manifestIdForUser = (userId) => `finance:investments:current:${userId || 'default'}`;
+
+const normalizeAsset = (asset) => ({
+  ...asset,
+  id: asset.id || asset.ticker,
+  avgPrice: Number(asset.avgPrice ?? asset.avg_price ?? 0) || 0,
+  currentprice: Number(asset.currentprice ?? asset.current_price ?? asset.price ?? asset.ltp ?? asset.avgPrice ?? asset.avg_price ?? 0) || 0,
+});
+
+const normalizeSnapshot = (doc) => ({
+  ...doc,
+  invested: Number(doc.invested ?? doc.total_invested ?? doc.current ?? 0) || 0,
+  current: Number(doc.current ?? doc.total_current ?? doc.invested ?? 0) || 0,
+});
+
+const snapshotTimestamp = (doc) => Date.parse(doc.updated ?? doc.last_updated ?? doc.created ?? doc.created_at ?? '') || 0;
+const snapshotTotal = (doc) => (Number(doc.invested) || 0) + (Number(doc.current) || 0);
+
+const isBetterSnapshot = (candidate, current) => {
+  if (!current) return true;
+
+  const candidateHasValue = snapshotTotal(candidate) > 0;
+  const currentHasValue = snapshotTotal(current) > 0;
+  if (candidateHasValue !== currentHasValue) return candidateHasValue;
+
+  const candidateTime = snapshotTimestamp(candidate);
+  const currentTime = snapshotTimestamp(current);
+  if (candidateTime !== currentTime) return candidateTime > currentTime;
+
+  return snapshotTotal(candidate) > snapshotTotal(current);
+};
+
+const collapseSnapshotsByMonth = (snapshots) => {
+  const byMonth = new Map();
+  snapshots.forEach(snapshot => {
+    if (isBetterSnapshot(snapshot, byMonth.get(snapshot.month))) {
+      byMonth.set(snapshot.month, snapshot);
+    }
+  });
+  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+};
+
+const isSnapshotDoc = (doc, userId) => {
+  if (!doc?.month) return false;
+  const typeMatch = doc.type === 'investment_snapshot' || doc.type === 'finance:investments:snapshot';
+  const idMatch = doc._id?.startsWith('snapshot_') || doc._id?.startsWith('finance:investments:snapshot:');
+  const userMatch = !userId || userId === 'default' || !doc.user_id || doc.user_id === userId;
+  return typeMatch && idMatch && userMatch;
+};
+
+const getCurrentManifest = async (dbInvestments, userId) => {
+  const canonicalId = manifestIdForUser(userId);
+  const canonical = await dbInvestments.get(canonicalId).catch(() => null);
+  if (canonical) return { doc: canonical, id: canonicalId };
+
+  const legacy = await dbInvestments.get(legacyManifestId).catch(() => null);
+  if (legacy) return { doc: legacy, id: legacyManifestId };
+
+  return {
+    id: canonicalId,
+    doc: {
+      _id: canonicalId,
+      type: 'finance:investments:manifest',
+      assets: [],
+      user_id: userId || 'default',
+    }
+  };
+};
+
 // ManifestOverrideModal — Data Entry Terminal
 const ManifestOverrideModal = ({ isOpen, onClose, holding, onSave }) => {
   const [ticker, setTicker] = useState('');
@@ -50,7 +120,7 @@ const ManifestOverrideModal = ({ isOpen, onClose, holding, onSave }) => {
 };
 
 // InteractiveMechChart — Dynamic SVG line chart
-const InteractiveMechChart = ({ months, series, isDual, yPrefix = '₹' }, { showAverage = true } = {}) => {
+const InteractiveMechChart = ({ months, series, isDual, yPrefix = '₹', showAverage = true }) => {
   const [hoverIdx, setHoverIdx] = useState(null);
   const svgRef = useRef(null);
 
@@ -269,26 +339,20 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
       if (!dbInvestments) return;
       try {
         const result = await dbInvestments.allDocs({ include_docs: true });
-        const snaps = result.rows
+        const snaps = collapseSnapshotsByMonth(result.rows
           .map(r => r.doc)
-          .filter(doc =>
-            doc.month &&
-            doc.type === 'investment_snapshot' &&
-            doc._id.startsWith('snapshot_') &&
-            (!userId || userId === 'default' || doc.user_id === userId)
-          )
-          .sort((a, b) => a.month.localeCompare(b.month));
+          .filter(doc => isSnapshotDoc(doc, userId))
+          .map(normalizeSnapshot)
+        );
         setHistory(snaps);
 
-        const hDoc = await dbInvestments
-          .get('current_holdings')
-          .catch(() => ({ assets: [], user_id: userId }));
+        const { doc: hDoc } = await getCurrentManifest(dbInvestments, userId);
 
         // FIX: Correct guard — only reject if userId is set, non-default, AND doesn't match
         if (userId && userId !== 'default' && hDoc.user_id && hDoc.user_id !== userId) {
           setHoldings([]);
         } else {
-          setHoldings(hDoc.assets ?? []);
+          setHoldings((hDoc.assets ?? []).map(normalizeAsset));
         }
 
         // Auto-select the most recent year that has data if current selection has no data
@@ -300,7 +364,21 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
       }
     };
     fetchInvestments();
-  }, [dbInvestments, data, userId]);
+    const changes = dbInvestments?.changes({ live: true, since: 'now', include_docs: true });
+    changes?.on('change', change => {
+      const id = change.id || change.doc?._id || '';
+      if (
+        id === legacyManifestId ||
+        id === manifestIdForUser(userId) ||
+        id.startsWith('finance:investments:snapshot:') ||
+        id.startsWith('snapshot_')
+      ) {
+        fetchInvestments();
+      }
+    });
+    changes?.on('error', err => console.error('AUSPEX:CHANGES', err));
+    return () => changes?.cancel();
+  }, [dbInvestments, data, userId, selectedYear]);
 
   useEffect(() => {
     if (!dbInvestments || holdings.length === 0) return;
@@ -312,7 +390,7 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
       const docId = `snapshot_${monthStr}`;
       try {
         const existing = await dbInvestments.get(docId).catch(() => null);
-        if (existing) return;
+        if (existing && (Number(existing.invested ?? existing.total_invested ?? 0) > 0 || Number(existing.current ?? existing.total_current ?? 0) > 0)) return;
         const totalInvested = holdings.reduce((acc, ast) => {
           const shares = Number(ast.shares) || 0;
           const avgPrice = Number(ast.avgPrice) || 0;
@@ -323,13 +401,16 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
           const currentPrice = Number(ast.currentprice ?? ast.price ?? ast.ltp ?? ast.avgPrice) || 0;
           return acc + (currentPrice * shares);
         }, 0);
+        if (totalInvested === 0 && totalCurrent === 0) return;
         const doc = {
           _id: docId,
+          _rev: existing?._rev,
           type: 'investment_snapshot',
           month: monthStr,
           invested: totalInvested,
           current: totalCurrent,
           user_id: userId,
+          updated: new Date().toISOString(),
         };
         await dbInvestments.put(doc);
         setHistory(prev => {
@@ -347,13 +428,10 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
   const saveHoldingToVault = async (ticker, newShares, newAvgPrice) => {
     if (!dbInvestments) return;
     try {
-      const manifestId = 'current_holdings';
-      const doc = await dbInvestments.get(manifestId).catch(() => ({
-        _id: manifestId,
-        type: 'investment_manifest',
-        assets: [],
-        user_id: userId,
-      }));
+      const { doc, id: manifestId } = await getCurrentManifest(dbInvestments, userId);
+      doc._id = manifestId;
+      doc.type = doc.type || 'finance:investments:manifest';
+      doc.assets = doc.assets || [];
 
       if (!doc.user_id) doc.user_id = userId;
       if (doc.user_id === 'default' && userId !== 'default') doc.user_id = userId;
@@ -364,17 +442,20 @@ const AuspexSlide = ({ data, dbInvestments, userId }) => {
       if (idx >= 0) {
         doc.assets[idx].shares = newShares;
         doc.assets[idx].avgPrice = newAvgPrice;
+        doc.assets[idx].avg_price = newAvgPrice;
       } else {
         doc.assets.push({
           id: `ast${Date.now()}`,
           ticker,
           shares: newShares,
           avgPrice: newAvgPrice,
+          avg_price: newAvgPrice,
           currentprice: newAvgPrice,
+          current_price: newAvgPrice,
         });
       }
       await dbInvestments.put(doc);
-      setHoldings(doc.assets);
+      setHoldings((doc.assets ?? []).map(normalizeAsset));
       setIsModalOpen(false);
       setEditingHolding(null);
     } catch (err) {

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import CrtAmbient from './layout/CrtAmbient';
 
 export const CrtShell = ({ children }) => {
   const [effectsEnabled] = useState(true);
@@ -12,6 +13,7 @@ export const CrtShell = ({ children }) => {
         <>
           <div className="scanlines"></div>
           <div className="vignette"></div>
+          <CrtAmbient />
         </>
       )}
 

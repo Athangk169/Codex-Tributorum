@@ -1,5 +1,6 @@
 // src/components/slides/OverviewSlide.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import LoreTicker from '../shared/LoreTicker';
 
 // ── ScrambleText ──────────────────────────────────────────────
 const ScrambleText = ({ text, speed = 60, step = 0.08 }) => {
@@ -8,7 +9,7 @@ const ScrambleText = ({ text, speed = 60, step = 0.08 }) => {
     let iter = 0;
     const chars   = '01X4A8C9#F>';
     const strText = String(text);
-    const skip    = new Set([' ', '₹', ',', '.', '+', '-', '%']);
+    const skip    = new Set([' ', ',', '.', '+', '-', '%']);
     const iv = setInterval(() => {
       setDisplay(strText.split('').map((c, i) => {
         if (skip.has(c) || i < iter) return c;
@@ -34,17 +35,33 @@ const ServoSkullOverview = ({ syncLed, globalAuditState, slideRef, dockRef }) =>
   const moveToElement = useCallback((element, mode = 'scan') => {
     if (!element || !slideRef.current) return;
     const slideRect = slideRef.current.getBoundingClientRect();
-    const elRect = element.getBoundingClientRect();
-    const scanFromRight = Math.random() > 0.5;
-    setBeamSide(scanFromRight ? 'left' : 'right');
-    const rawX = mode === 'dock'
-      ? elRect.left - slideRect.left
-      : scanFromRight
+    const elRect    = element.getBoundingClientRect();
+    const SKULL = 68;
+
+    let rawX, rawY;
+    if (mode === 'dock') {
+      rawX = elRect.left - slideRect.left;
+      rawY = elRect.top  - slideRect.top;
+    } else {
+      const scanFromRight = Math.random() > 0.5;
+      rawX = scanFromRight
         ? elRect.right - slideRect.left + 12
-        : elRect.left - slideRect.left - 78;
-    const rawY = mode === 'dock'
-      ? elRect.top - slideRect.top
-      : elRect.top - slideRect.top + Math.max(0, (elRect.height - 68) / 2);
+        : elRect.left  - slideRect.left - (SKULL + 10);
+      rawY = elRect.top - slideRect.top + Math.max(0, (elRect.height - SKULL) / 2);
+    }
+
+    // Clamp BEFORE deciding beam direction — otherwise a clamped skull
+    // ends up facing away from the target when it gets pushed past it.
+    const clampedX = Math.max(4, Math.min(slideRect.width  - SKULL - 4, rawX));
+    const clampedY = Math.max(4, Math.min(slideRect.height - SKULL - 4, rawY));
+
+    if (mode !== 'dock') {
+      const skullCenterX  = clampedX + SKULL / 2;
+      const targetCenterX = elRect.left - slideRect.left + elRect.width / 2;
+      // beamSide = the side the beam exits → "right" means skull is LEFT
+      // of target and faces right toward it.
+      setBeamSide(skullCenterX < targetCenterX ? 'right' : 'left');
+    }
 
     activeTargetRef.current?.classList.remove('ov-skull-active');
     if (mode === 'dock') {
@@ -55,10 +72,7 @@ const ServoSkullOverview = ({ syncLed, globalAuditState, slideRef, dockRef }) =>
     }
 
     setSkullMode(mode);
-    setPosition({
-      x: Math.max(4, Math.min(slideRect.width - 72, rawX)),
-      y: Math.max(4, Math.min(slideRect.height - 72, rawY)),
-    });
+    setPosition({ x: clampedX, y: clampedY });
   }, [slideRef]);
 
   const moveToDock = useCallback(() => {
@@ -110,19 +124,29 @@ const ServoSkullOverview = ({ syncLed, globalAuditState, slideRef, dockRef }) =>
 
   useEffect(() => {
     let t = 0;
+    // beamSide can change without skullMode changing (skull hops between
+    // two scan targets on opposite sides). Stash in a ref so the interval
+    // always reads the latest value instead of a stale closure.
+    const sideRef = { current: beamSide };
+    sideRef.current = beamSide;
+
     const iv = setInterval(() => {
       if (!mvRef.current) return;
 
       t += 0.018;
+      const side = sideRef.current;
 
       let theta, phi;
       switch (skullMode) {
         case 'scan':
-          theta = (beamSide === 'right' ? -125 : 125) + Math.sin(t * 1.6) * 7;
+          // side === 'right' → skull is LEFT of target, must face right →
+          // negative theta brings the camera to the skull's right, which
+          // visually rotates the skull's gaze toward the target.
+          theta = (side === 'right' ? -125 : 125) + Math.sin(t * 1.6) * 7;
           phi   = 76 + Math.sin(t * 1.2 + 0.9) * 4;
           break;
         case 'focus':
-          theta = (beamSide === 'right' ? -145 : 145) + Math.sin(t * 0.8) * 4;
+          theta = (side === 'right' ? -145 : 145) + Math.sin(t * 0.8) * 4;
           phi   = 74 + Math.sin(t * 0.5) * 2;
           break;
         case 'glitch':
@@ -138,7 +162,7 @@ const ServoSkullOverview = ({ syncLed, globalAuditState, slideRef, dockRef }) =>
     }, 50);
 
     return () => clearInterval(iv);
-  }, [skullMode]);
+  }, [skullMode, beamSide]);
 
   useEffect(() => {
     moveToDock();
@@ -448,28 +472,24 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
 
   const bankTotal  = buckets.Bank || 0;
   const cashTotal  = buckets.Cash || 0;
-  const cardTotal  = buckets.Card || 0;
   const ar         = buckets.AR          || 0;
   const provisions = buckets.Provisions  || 0;
+
+  const formatDateShort = (ds) => {
+    if (!ds) return '—';
+    const d = new Date(ds);
+    if (isNaN(d)) return ds;
+    const mon = d.toLocaleString('en-GB', { month: 'short' }).toUpperCase();
+    return `${d.getDate()} ${mon}`;
+  };
+  const upcomingBuckets = (data?.cardObligations?.allBuckets || []).filter(b => b.status !== 'paid');
+  const cardTotal       = data?.totalDebt ?? (buckets.Card || 0);
+  const totalCardDebt   = cardTotal;
 
   const liquidReserve  = bankTotal + cashTotal;
   const netPosition    = liquidReserve - cardTotal;
   const totalCardLimit = (data?.cards || []).reduce((sum, c) => sum + (c.limit || 0), 0);
   const creditHeadroom = Math.max(0, totalCardLimit - cardTotal);
-
-  const formatDate = (ds) => {
-    if (!ds) return 'NO DEBT DETECTED';
-    const d = new Date(ds);
-    if (isNaN(d)) return ds;
-    const day = d.getDate();
-    const mon = d.toLocaleString('en-GB', { month: 'long' }).toUpperCase();
-    const sfx = ['th','st','nd','rd'];
-    const v = day % 100;
-    return day + (sfx[(v-20)%10] || sfx[v] || sfx[0]) + ' ' + mon;
-  };
-  const nextBucket = data?.cardObligations?.buckets?.find(b => b.status !== 'paid') || {};
-  const ccDueAmt   = nextBucket.outstanding || 0;
-  const ccDueDate  = nextBucket.due_date ? formatDate(nextBucket.due_date) : 'NO DEBT DETECTED';
 
   const bankAccounts = (data?.accounts || []).filter(a => a.parent === 'Bank');
   let maxDays = 0;
@@ -597,7 +617,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
 
             <div className="ov-kpi-lbl" style={{ color: 'var(--border-hi)' }}>LIQUID RESERVE</div>
             <div className="ov-kpi-val-lg ov-kpi-green">
-              ₹ <ScrambleText text={liquidReserve.toLocaleString()} />
+              <ScrambleText text={liquidReserve.toLocaleString()} />
             </div>
             <div className="ov-kpi-sub">BANK + CASH · REAL MONEY</div>
           </div>
@@ -605,7 +625,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
           <div className="ov-panel ov-target-hover" style={{ padding: '14px 16px' }}>
             <div className="ov-kpi-lbl">NET POSITION</div>
             <div className={`ov-kpi-val-md ${netPosition >= 0 ? 'ov-kpi-green' : 'ov-kpi-red'}`}>
-              ₹ <ScrambleText text={netPosition.toLocaleString()} />
+              <ScrambleText text={netPosition.toLocaleString()} />
             </div>
             <div className="ov-kpi-sub">LIQUID − DEBT</div>
           </div>
@@ -613,7 +633,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
           <div className="ov-panel ov-target-hover" style={{ padding: '14px 16px' }}>
             <div className="ov-kpi-lbl" style={{ color: 'var(--amber)' }}>CREDIT HEADROOM</div>
             <div className="ov-kpi-val-md ov-kpi-amber">
-              ₹ <ScrambleText text={creditHeadroom.toLocaleString()} />
+              <ScrambleText text={creditHeadroom.toLocaleString()} />
             </div>
             <div className="ov-kpi-sub">LIMIT − UTILISED</div>
           </div>
@@ -621,14 +641,14 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
           <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px' }}>
             <div className="ov-kpi-lbl">TITHE INFLOW</div>
             <div className="ov-kpi-val-md ov-kpi-green">
-              ₹ <ScrambleText text={income.toLocaleString()} />
+              <ScrambleText text={income.toLocaleString()} />
             </div>
           </div>
 
           <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px' }}>
             <div className="ov-kpi-lbl">EXPENDITURE</div>
             <div className="ov-kpi-val-md ov-kpi-red">
-              ₹ <ScrambleText text={expense.toLocaleString()} />
+              <ScrambleText text={expense.toLocaleString()} />
             </div>
           </div>
         </div>
@@ -645,7 +665,14 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                   <div className="ov-row">
                     <span className="ov-rl">CYCLE</span>
                     <span className="ov-rv" style={{ fontSize: '10px' }}>
-                      <ScrambleText text={new Date().toLocaleDateString('en-GB')} />
+                      <ScrambleText text={(() => {
+                        const d = new Date();
+                        const day = d.getDate();
+                        const v = day % 100;
+                        const sfx = ['th','st','nd','rd'];
+                        const ord = day + (sfx[(v - 20) % 10] || sfx[v] || sfx[0]);
+                        return `${ord} ${d.toLocaleString('en-GB', { month: 'long' }).toUpperCase()}`;
+                      })()} />
                     </span>
                   </div>
                   <div className="ov-row">
@@ -662,21 +689,60 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                   </div>
                 </div>
               </div>
+              <div style={{
+                marginTop: '10px',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--ba-border-lo)',
+              }}>
+                <LoreTicker />
+              </div>
             </div>
 
             <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px' }}>
               <div className="ov-ttl">OBLIGATIONS</div>
-              <div style={{ textAlign: 'center' }}>
-                <div className="ov-kpi-lbl" style={{ marginBottom: '4px' }}>NEXT RITUAL DUE</div>
-                <div style={{ fontSize: '16px', color: ccDueAmt > 0 ? '#e0c070' : 'var(--border-hi)', fontWeight: 'bold', fontFamily: 'var(--mono)', marginBottom: '10px' }}>
-                  <ScrambleText text={ccDueDate} />
+              {upcomingBuckets.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                  <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>BLOOD DEBT</div>
+                  <div className="ov-debt-ok" style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
+                    <ScrambleText text="0" />
+                  </div>
+                  <div className="ov-kpi-sub" style={{ marginTop: '4px' }}>NO DEBT DETECTED</div>
                 </div>
-                <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, #4a0a00, transparent)', marginBottom: '10px' }} />
-                <div className="ov-kpi-lbl" style={{ color: ccDueAmt > 0 ? '#cc2200' : 'var(--ba-gold-dim)' }}>BLOOD DEBT</div>
-                <div className={ccDueAmt > 0 ? 'ov-debt-warn glitch-crit' : 'ov-debt-ok'} style={{ fontSize: '26px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                  ₹ <ScrambleText text={ccDueAmt.toLocaleString()} />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="ov-kpi-lbl" style={{ marginBottom: '6px' }}>UPCOMING DUES</div>
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', gap: '4px',
+                    maxHeight: '110px', overflowY: 'auto', paddingRight: '4px',
+                  }}>
+                    {upcomingBuckets.map(b => (
+                      <div key={b.due_date} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                        fontFamily: 'var(--mono)', fontSize: '12px',
+                        padding: '2px 0',
+                      }}>
+                        <span style={{
+                          color: b.status === 'overdue' ? '#cc2200' : '#e0c070',
+                          letterSpacing: '1px',
+                        }}>
+                          {formatDateShort(b.due_date)}
+                          {b.status === 'overdue' && <span style={{ fontSize: '9px', marginLeft: '4px' }}>LATE</span>}
+                        </span>
+                        <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                          {Math.round(b.outstanding).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, #4a0a00, transparent)', margin: '8px 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span className="ov-kpi-lbl" style={{ color: '#cc2200' }}>BLOOD DEBT</span>
+                    <span className="ov-debt-warn glitch-crit" style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
+                      <ScrambleText text={totalCardDebt.toLocaleString()} />
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="ov-panel ov-panel-hi" style={{ padding: '12px 14px', position: 'relative' }}>
@@ -687,11 +753,11 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '8px' }}>
                   <div className="ov-kpi-lbl">NET INCOME</div>
-                  <div className="ov-kpi-val-sm ov-kpi-green">₹ <ScrambleText text={netIncome.toLocaleString()} /></div>
+                  <div className="ov-kpi-val-sm ov-kpi-green"><ScrambleText text={netIncome.toLocaleString()} /></div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                   <div className="ov-kpi-lbl">NET SPEND</div>
-                  <div className="ov-kpi-val-sm ov-kpi-red">₹ <ScrambleText text={netExpense.toLocaleString()} /></div>
+                  <div className="ov-kpi-val-sm ov-kpi-red"><ScrambleText text={netExpense.toLocaleString()} /></div>
                 </div>
               </div>
             </div>
@@ -738,7 +804,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                           <span style={{ color: '#fff' }}>{tx.description || tx.category}</span>
                           <span style={{ color: '#3a0800' }}>—</span>
                           <span className={isNeg ? 'ov-amt-neg' : 'ov-amt-pos'}>
-                            {isNeg ? '' : '+'}₹{Math.abs(tx.amount || 0).toLocaleString()}
+                            {isNeg ? '' : '+'}{Math.abs(tx.amount || 0).toLocaleString()}
                           </span>
                           <span style={{ color: '#4a2010', fontSize: '9px' }}>{tx.category}</span>
                         </div>
@@ -765,7 +831,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                     <div key={cat}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--ba-gold-dim)', letterSpacing: '1px', marginBottom: '3px' }}>
                         <span>{cat.toUpperCase()}</span>
-                        <span style={{ color: 'var(--text-d)' }}>₹ {amt.toLocaleString()}</span>
+                        <span style={{ color: 'var(--text-d)' }}>{amt.toLocaleString()}</span>
                       </div>
                       <div className="ov-bar-track">
                         <div className="ov-bar-fill" style={{ width: `${pct}%` }} />
@@ -784,7 +850,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                     <div key={tag} className="ov-ar-row">
                       <span className="ov-ar-tag">{tag}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="ov-ar-amt">₹ {Math.round(amt).toLocaleString()}</span>
+                        <span className="ov-ar-amt">{Math.round(amt).toLocaleString()}</span>
                         {dbTransactions && (
                           <button
                             onClick={() => handleClearAR(tag, amt)}
@@ -803,7 +869,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid var(--ba-border-lo)', fontSize: '10px' }}>
                     <span style={{ color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>TOTAL OUTSTANDING</span>
                     <span style={{ color: 'var(--border-hi)', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                      ₹ {Math.round(openAR.reduce((s,[,a]) => s+a, 0)).toLocaleString()}
+                      {Math.round(openAR.reduce((s,[,a]) => s+a, 0)).toLocaleString()}
                     </span>
                   </div>
                 </>
@@ -817,11 +883,11 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', flexShrink: 0 }}>
               <div className="ov-panel ov-target-hover" style={{ padding: '10px 12px' }}>
                 <div className="ov-kpi-lbl">PENDING AR</div>
-                <div className="ov-kpi-val-sm ov-kpi-green">₹ <ScrambleText text={openAR.reduce((s,[,a]) => s+a, 0).toLocaleString()} /></div>
+                <div className="ov-kpi-val-sm ov-kpi-green"><ScrambleText text={openAR.reduce((s,[,a]) => s+a, 0).toLocaleString()} /></div>
               </div>
               <div className="ov-panel ov-target-hover" style={{ padding: '10px 12px' }}>
                 <div className="ov-kpi-lbl">PROVISIONS</div>
-                <div className="ov-kpi-val-sm ov-kpi-white">₹ <ScrambleText text={provisions.toLocaleString()} /></div>
+                <div className="ov-kpi-val-sm ov-kpi-white"><ScrambleText text={provisions.toLocaleString()} /></div>
               </div>
             </div>
 

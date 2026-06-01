@@ -14,7 +14,7 @@ const ScrambleText = ({ text }) => {
 
     const interval = setInterval(() => {
       setDisplay(strText.split('').map((char, i) => {
-        if (char === ' ' || char === '₹' || char === ',') return char;
+        if (char === ' ' || char === ',') return char;
         if (i < iter) return char;
         return chars[Math.floor(Math.random() * chars.length)];
       }).join(''));
@@ -133,9 +133,13 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
   const [auditProgress, setAuditProgress] = useState(0);
   const [isAuditing,    setIsAuditing]    = useState(false);
   const [sealStamped,   setSealStamped]   = useState(false);
-  const auditTimerRef = useRef(null);
+  const auditTimerRef = useRef(null);   // legacy — kept for cleanup safety
+  const auditRafRef   = useRef(null);
+  const auditStartRef = useRef(0);
+  const auditCollapseRef = useRef(null);
+  const RITE_DURATION_MS = 2500;
 
-  const formatAmount = (amt) => `₹ ${Math.abs(amt || 0).toLocaleString()}`;
+  const formatAmount = (amt) => `${Math.abs(amt || 0).toLocaleString()}`;
 
   // ==================== DATA LOADING ====================
   // FIX: loadData now reads from the `data` prop supplied by useFinanceData
@@ -170,7 +174,10 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
   // Cleanup timers on unmount
   useEffect(() => {
-    return () => clearInterval(auditTimerRef.current);
+    return () => {
+      clearInterval(auditTimerRef.current);
+      if (auditRafRef.current) cancelAnimationFrame(auditRafRef.current);
+    };
   }, []);
 
   // ==================== RECENT TRANSACTIONS ====================
@@ -249,42 +256,69 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
   };
 
   // ==================== AUDITOR RITUAL LOGIC ====================
-  const startAuditRitual = () => {
+  // rAF-driven progress so the fill bar moves smoothly instead of
+  // stair-stepping. Pointer capture keeps the press active even when
+  // the cursor leaves the button — slip-tolerant hold.
+  const startAuditRitual = (e) => {
+    if (e?.pointerId !== undefined && e.currentTarget?.setPointerCapture) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+    if (auditRafRef.current) cancelAnimationFrame(auditRafRef.current);
+    if (auditCollapseRef.current) { clearTimeout(auditCollapseRef.current); auditCollapseRef.current = null; }
     setIsAuditing(true);
     setAuditProgress(0);
-    clearInterval(auditTimerRef.current);
+    auditStartRef.current = performance.now();
 
-    auditTimerRef.current = setInterval(() => {
-      setAuditProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(auditTimerRef.current);
-          completeAuditRitual();
-          return 100;
-        }
-        return prev + 4;
-      });
-    }, 100);
+    const tick = (now) => {
+      const elapsed = now - auditStartRef.current;
+      const pct = Math.min(100, (elapsed / RITE_DURATION_MS) * 100);
+      setAuditProgress(pct);
+      if (pct >= 100) {
+        auditRafRef.current = null;
+        completeAuditRitual();
+      } else {
+        auditRafRef.current = requestAnimationFrame(tick);
+      }
+    };
+    auditRafRef.current = requestAnimationFrame(tick);
   };
 
   const stopAuditRitual = () => {
-    clearInterval(auditTimerRef.current);
+    // If null, we're either complete (don't clobber the sealed state) or
+    // never started — either way, nothing to do.
+    if (auditRafRef.current === null) return;
+    cancelAnimationFrame(auditRafRef.current);
+    auditRafRef.current = null;
     setIsAuditing(false);
-    if (auditProgress < 100) setAuditProgress(0);
+    setAuditProgress(0);
   };
 
   const completeAuditRitual = async () => {
-    if (!selectedAccount) return;
+    if (!selectedAccount) {
+      setIsAuditing(false);
+      setAuditProgress(0);
+      return;
+    }
     const auditedAt = new Date().toISOString();
-    await AccountEngine.updateAccount(selectedAccount._id, {
-      last_audited_date: auditedAt
-    }, dbMetadata, userId);
-
-    setAuditProgress(0);
     setIsAuditing(false);
-    setSelectedAccount(prev => prev ? { ...prev, last_audited_date: auditedAt } : prev);
     setSealStamped(true);
     setTimeout(() => setSealStamped(false), 2800);
-    loadData();
+    // Reset progress on the next frame so the fill bar's "100% sealed"
+    // state is briefly visible before it collapses.
+    auditCollapseRef.current = setTimeout(() => {
+      setAuditProgress(0);
+      auditCollapseRef.current = null;
+    }, 350);
+
+    try {
+      await AccountEngine.updateAccount(selectedAccount._id, {
+        last_audited_date: auditedAt
+      }, dbMetadata, userId);
+      setSelectedAccount(prev => prev ? { ...prev, last_audited_date: auditedAt } : prev);
+      loadData();
+    } catch (err) {
+      console.error('AUDIT RITE FAILED:', err);
+    }
   };
 
   // ==================== RENDER CALCULATIONS ====================
@@ -361,14 +395,14 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
         }
         @keyframes suspensorCorrupt {
           0%, 100% { transform: translateY(0) rotate(0deg); }
-          25%      { transform: translateY(-4px) rotate(-2deg); }
-          50%      { transform: translateY(6px) rotate(3deg); }
-          75%      { transform: translateY(-6px) rotate(-1deg); }
+          25%      { transform: translateY(-3px) rotate(-1.2deg); }
+          50%      { transform: translateY(4px)  rotate(1.6deg); }
+          75%      { transform: translateY(-4px) rotate(-0.8deg); }
         }
 
-        .bob-pure { animation: suspensorPure 4s ease-in-out infinite; }
+        .bob-pure     { animation: suspensorPure     4s   ease-in-out infinite; }
         .bob-restless { animation: suspensorRestless 2.5s ease-in-out infinite; }
-        .bob-corrupt { animation: suspensorCorrupt 0.4s linear infinite; }
+        .bob-corrupt  { animation: suspensorCorrupt  1.1s ease-in-out infinite; }
 
         /* Hold-to-confirm button */
         .rite-btn {
@@ -379,44 +413,79 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
         .rite-btn:active { transform: scale(0.98); }
         .rite-fill {
           position: absolute; top: 0; left: 0; bottom: 0;
-          background: rgba(201,168,76,0.3); z-index: 0; transition: width 0.1s linear;
+          background: linear-gradient(90deg, rgba(201,168,76,0.18), rgba(204,34,0,0.35));
+          box-shadow: inset 0 0 12px rgba(204,34,0,0.25);
+          z-index: 0;
+          /* No CSS transition — rAF drives the width each frame. */
         }
+        .rite-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
         .rite-content { position: relative; z-index: 1; }
 
-        /* Purity Seal */
-      @keyframes sealStamp {
-        0% {
-          transform: translateY(-42px) scale(1.45) rotate(-3deg);
-          opacity: 0;
-          filter: brightness(4) saturate(0);
+        /* Purity Seal stamp — drop-shadow only (no mix-blend-mode). */
+        @keyframes sealStamp {
+          0% {
+            transform: translateY(-90px) scale(1.65) rotate(-4deg);
+            opacity: 0;
+            filter:
+              drop-shadow(0 14px 24px rgba(0,0,0,0.95))
+              drop-shadow(0 0 18px rgba(255,210,120,0.45))
+              brightness(1.55) saturate(1.2);
+          }
+          18% {
+            transform: translateY(4px) scale(0.94) rotate(1deg);
+            opacity: 1;
+            filter:
+              drop-shadow(0 10px 18px rgba(0,0,0,0.95))
+              drop-shadow(0 0 36px rgba(255,225,140,0.85))
+              brightness(1.5) saturate(1.3) contrast(1.1);
+          }
+          26% {
+            transform: translateY(0) scale(1.04) rotate(0deg);
+            opacity: 1;
+            filter:
+              drop-shadow(0 8px 14px rgba(0,0,0,0.85))
+              drop-shadow(0 0 22px rgba(201,168,76,0.7))
+              brightness(1.18) saturate(1.15);
+          }
+          70% {
+            transform: translateY(0) scale(1) rotate(0deg);
+            opacity: 1;
+            filter:
+              drop-shadow(0 6px 12px rgba(0,0,0,0.85))
+              drop-shadow(0 0 14px rgba(201,168,76,0.45))
+              brightness(1) saturate(1);
+          }
+          100% {
+            transform: translateY(0) scale(1) rotate(0deg);
+            opacity: 0;
+            filter:
+              drop-shadow(0 6px 12px rgba(0,0,0,0.6))
+              brightness(1) saturate(0.9);
+          }
         }
-        18% {
-          transform: translateY(5px) scale(0.98) rotate(1deg);
-          opacity: 1;
-          filter: brightness(2) saturate(1.4) contrast(1.2);
+        .seal-stamp {
+          animation: sealStamp 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          transform-origin: center center;
         }
-        28% {
-          transform: translateY(0) scale(1.04) rotate(0deg);
-          opacity: 1;
-          filter: brightness(1.3) saturate(1.2) contrast(1.1);
-        }
-        70% {
-          transform: translateY(0) scale(1.04) rotate(0deg);
-          opacity: 1;
-        }
-        100% {
-          transform: translateY(3px) scale(1) rotate(0deg);
-          opacity: 0;
-          filter: brightness(1) contrast(1.05);
-        }
-      }
 
-      .seal-stamp {
-        animation: sealStamp 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-        mix-blend-mode: screen;
-        text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
-        transform-origin: center center;
-      }
+        /* ── Impact ring — gold halo that expands outward on contact ── */
+        @keyframes sealImpactRing {
+          0%   { transform: translate(-50%, -50%) scale(0.35); opacity: 0; border-width: 3px; }
+          12%  { opacity: 0; }
+          16%  { opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(2.4);  opacity: 0; border-width: 1px; }
+        }
+        .seal-impact-ring {
+          position: absolute; top: 50%; left: 50%;
+          width: 180px; height: 180px;
+          border: 3px solid var(--ba-gold);
+          border-radius: 50%;
+          box-shadow: 0 0 24px rgba(201,168,76,0.55),
+                      inset 0 0 18px rgba(201,168,76,0.4);
+          animation: sealImpactRing 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          pointer-events: none;
+          z-index: 49;
+        }
 
       @keyframes sealPulse {
         0%, 100% { opacity: 0.5; }
@@ -472,7 +541,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                         {account.name.toUpperCase()}
                       </div>
                       <div style={{ fontSize: '10px', color: 'var(--text-d)' }}>
-                        MIN: ₹{(accMin / 1000).toFixed(0)}k
+                        MIN: {(accMin / 1000).toFixed(0)}k
                       </div>
                     </div>
 
@@ -528,15 +597,18 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
               {/* Stamp effect on ritual completion */}
               {sealStamped && (
-                <div style={{
-                  position: 'absolute', top: '50%', left: '50%',
-                  transform: 'translate(-50%, -60%)',
-                  width: '180px', height: 'auto', zIndex: 50, pointerEvents: 'none',
-                }}>
-                  <div className="seal-stamp">
-                    <img src="/purity_seal.jpg" alt="" style={{ width: '100%', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(201,168,76,0.8))' }} />
+                <>
+                  <div className="seal-impact-ring" />
+                  <div style={{
+                    position: 'absolute', top: '50%', left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '180px', height: 'auto', zIndex: 50, pointerEvents: 'none',
+                  }}>
+                    <div className="seal-stamp">
+                      <img src="/purity_seal.jpg" alt="" style={{ width: '100%', height: 'auto', display: 'block' }} />
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               {/* Header & Balance */}
@@ -552,13 +624,13 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                     </div>
                     {minBalance > 0 && (
                       <div style={{ fontSize: '9px', color: 'var(--text-d)' }}>
-                        RESERVE FLOOR: ₹{minBalance.toLocaleString()}
+                        RESERVE FLOOR: {minBalance.toLocaleString()}
                       </div>
                     )}
                   </div>
 
                   <div style={{ fontFamily: 'var(--mono)', fontSize: '28px', fontWeight: 'bold', color: isBalanceCritical ? 'var(--ba-crimson)' : 'var(--border-hi)', textShadow: isBalanceCritical ? '0 0 10px rgba(204,34,0,0.6)' : 'var(--glow)' }}>
-                    ₹ <ScrambleText text={Math.abs(activeBalance).toLocaleString()} />
+                    <ScrambleText text={Math.abs(activeBalance).toLocaleString()} />
                   </div>
 
                   {/* Liquid Telemetry Bar */}
@@ -596,11 +668,10 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
                   <button
                     className="rite-btn"
-                    onMouseDown={startAuditRitual}
-                    onMouseUp={stopAuditRitual}
-                    onMouseLeave={stopAuditRitual}
-                    onTouchStart={startAuditRitual}
-                    onTouchEnd={stopAuditRitual}
+                    onPointerDown={startAuditRitual}
+                    onPointerUp={stopAuditRitual}
+                    onPointerCancel={stopAuditRitual}
+                    style={{ touchAction: 'none' }}
                   >
                     <span className="rite-fill" style={{ width: `${auditProgress}%` }} />
                     <span className="rite-content">
@@ -633,7 +704,7 @@ const BankAccountsSlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                               <span style={{ color: '#fff' }}>{txn.description}</span>
                               <span style={{ color: '#3a0800' }}>—</span>
                               <span className={isNeg ? 'warn' : 'ok'} style={{ fontWeight: 'bold' }}>
-                                {isNeg ? '' : '+'}₹{Math.abs(txn.amount).toLocaleString()}
+                                {isNeg ? '' : '+'}{Math.abs(txn.amount).toLocaleString()}
                               </span>
                               <span style={{ color: '#3a0800' }}>—</span>
                               <span style={{ color: '#6a4020', fontSize: '10px' }}>{txn.category || 'UNKNOWN'}</span>

@@ -21,7 +21,7 @@ import React, { useState, useEffect } from 'react';
 const CHARS = '01X4A8C9#F>';
 
 // Characters that are always passed through unchanged
-const PASSTHROUGH = new Set([' ', '₹', ',', '.', ':', '-', '+', '/']);
+const PASSTHROUGH = new Set([' ', ',', '.', ':', '-', '+', '/']);
 
 const ScrambleText = ({ text, speed = 40, step = 0.25 }) => {
   const [display, setDisplay] = useState(text);

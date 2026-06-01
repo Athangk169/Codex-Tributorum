@@ -1,5 +1,6 @@
 // src/components/slides/HoloSlide.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useRulesAndCategories } from '../../hooks/useRulesAndCategories';
 
 // ── Cryptographic Scrambler ──
 const ScrambleText = ({ text }) => {
@@ -13,7 +14,7 @@ const ScrambleText = ({ text }) => {
 
     const interval = setInterval(() => {
       setDisplay(strText.split('').map((char, i) => {
-        if (char === ' ' || char === '₹' || char === ',') return char;
+        if (char === ' ' || char === ',') return char;
         if (i < iter) return char;
         return chars[Math.floor(Math.random() * chars.length)];
       }).join(''));
@@ -93,200 +94,94 @@ const StatusBar = ({ statusMsg, rulesCount }) => (
 );
 
 const HoloSlide = ({ data, db, userId }) => {
-  const [rules, setRules] = useState([]);
-  const [categoryConfig, setCategoryConfig] = useState({ income_categories: [], neutral_categories: [], expense_categories: [] });
-  const [selectedRuleId, setSelectedRuleId] = useState('');
-  const [newKeyword, setNewKeyword] = useState('');
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [newCategoryType, setNewCategoryType] = useState('expense');
-  const [editingRule, setEditingRule] = useState(null);
-  const [editName, setEditName] = useState('');
-  const [statusMsg, setStatusMsg] = useState(null);
-  
+  // ◈ Data layer: shared hook with optimistic writes ◈
+  const {
+    rules,
+    getCatType,
+    addCategory,
+    deleteCategory,
+    renameCategory,
+    updateType,
+    addKeyword,
+    deleteKeyword,
+  } = useRulesAndCategories(db, userId);
+
+  const [selectedRuleId, setSelectedRuleId]     = useState('');
+  const [newKeyword, setNewKeyword]             = useState('');
+  const [newCategoryName, setNewCategoryName]   = useState('');
+  const [newCategoryType, setNewCategoryType]   = useState('expense');
+  const [editingRule, setEditingRule]           = useState(null);
+  const [editName, setEditName]                 = useState('');
+  const [statusMsg, setStatusMsg]               = useState(null);
+
   // ── MULTI-SYSTEM FEED STATE ──
-  const [activeHolo, setActiveHolo] = useState('baal');
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [activeHolo, setActiveHolo]             = useState('baal');
+  const [isExpanded, setIsExpanded]             = useState(false);
+  const [isTransitioning, setIsTransitioning]   = useState(false);
 
-  // ◈ V2 ENGINE COMPLIANT DATA LOAD ◈
-  const loadRules = useCallback(async () => {
-    if (!db || !userId) return;
-
-    try {
-      const allDocs = await db.allDocs({ 
-        include_docs: true,
-        startkey: `finance:rule:${userId}:`,
-        endkey:   `finance:rule:${userId}:\uffff`
-      });
-
-      const uniqueRules = {};
-      allDocs.rows
-        .map(row => row.doc)
-        .filter(d => d.type === 'finance:rule' && d.user_id === userId && d.is_active)
-        .forEach(rule => {
-          uniqueRules[rule.category_name] = rule;
-        });
-
-      const r = Object.values(uniqueRules).sort((a, b) => 
-        a.category_name.localeCompare(b.category_name)
-      );
-      setRules(r);
-
-      // Fetch v2 configuration
-      let config;
-      try {
-        config = await db.get(`finance:config:categories:${userId}`);
-      } catch {
-        config = { 
-          _id: `finance:config:categories:${userId}`, 
-          type: 'finance:config',
-          user_id: userId,
-          income_categories: [], 
-          neutral_categories: [], 
-          expense_categories: [] 
-        };
-      }
-      setCategoryConfig(config);
-
-      setSelectedRuleId(prev => (!prev && r.length > 0 ? r[0]._id : prev));
-    } catch (err) {
-      flash('// DB READ FAILURE', true);
-      console.error(err);
-    }
-  }, [db, userId]);
-
-  useEffect(() => { loadRules(); }, [loadRules, userId, data]);
+  // Default-select the first rule once they load.
+  useEffect(() => {
+    if (!selectedRuleId && rules.length > 0) setSelectedRuleId(rules[0]._id);
+  }, [rules, selectedRuleId]);
 
   const flash = (text, error = false) => {
     setStatusMsg({ text, error });
     setTimeout(() => setStatusMsg(null), 2500);
   };
 
-  const getCatType = (name) => {
-    if (categoryConfig.income_categories?.includes(name)) return 'income';
-    if (categoryConfig.neutral_categories?.includes(name)) return 'neutral';
-    return 'expense';
-  };
-
+  // ── Handlers — thin wrappers around hook mutations ──────────
   const handleUpdateType = async (categoryName, newType) => {
     try {
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try {
-        conf = await db.get(confId);
-      } catch {
-        conf = {
-          _id: confId, type: 'finance:config', user_id: userId,
-          income_categories: [], neutral_categories: [], expense_categories: []
-        };
-      }
-
-      conf.income_categories = (conf.income_categories || []).filter(c => c !== categoryName);
-      conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== categoryName);
-      conf.expense_categories = (conf.expense_categories || []).filter(c => c !== categoryName);
-
-      if (newType === 'income') conf.income_categories.push(categoryName);
-      else if (newType === 'neutral') conf.neutral_categories.push(categoryName);
-      else conf.expense_categories.push(categoryName);
-
-      await db.put(conf);
+      await updateType(categoryName, newType);
       flash(`// TYPE RECALIBRATED >> ${newType.toUpperCase()}`);
-      loadRules();
-    } catch {
-      flash('// WRITE ERROR', true);
+    } catch (e) {
+      flash(`// WRITE ERROR :: ${e.message || 'UNKNOWN'}`, true);
     }
   };
 
   const handleAddKeyword = async () => {
     if (!newKeyword.trim() || !selectedRuleId) return;
-    const rule = rules.find(r => r._id === selectedRuleId);
-    if (!rule) return;
-    const kw = newKeyword.trim().toLowerCase();
-    if (rule.keywords.includes(kw)) { flash('// KEYWORD ALREADY EXISTS', true); return; }
     try {
-      await db.put({ ...rule, keywords: [...rule.keywords, kw], updated: new Date().toISOString() });
+      await addKeyword(selectedRuleId, newKeyword);
+      const kw = newKeyword.trim().toLowerCase();
       setNewKeyword('');
       flash(`// KEYWORD UPLINKED >> ${kw.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleDeleteKeyword = async (ruleId, kw) => {
-    const rule = rules.find(r => r._id === ruleId);
-    if (!rule) return;
     try {
-      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw), updated: new Date().toISOString() });
+      await deleteKeyword(ruleId, kw);
       flash(`// KEYWORD PURGED >> ${kw.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleAddCategory = async () => {
     const name = newCategoryName.trim();
-    if (!name || !userId) return;
-
-    const slug = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const id = `finance:rule:${userId}:${slug}`;
-
-    if (rules.find(r => r._id === id || r.category_name.toLowerCase() === name.toLowerCase())) {
-      flash('// CATEGORY ALREADY EXISTS', true);
-      return;
-    }
-
+    if (!name) return;
     try {
-      await db.put({
-        _id: id,
-        type: 'finance:rule',
-        user_id: userId,
-        category_name: name,
-        keywords: [],
-        is_active: true,
-        created: new Date().toISOString(),
-        updated: new Date().toISOString()
-      });
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      if (newCategoryType === 'income') conf.income_categories.push(name);
-      else if (newCategoryType === 'neutral') conf.neutral_categories.push(name);
-      else conf.expense_categories.push(name);
-
-      await db.put(conf);
-
+      const newId = await addCategory(name, newCategoryType);
       setNewCategoryName('');
       setNewCategoryType('expense');
       flash(`// CATEGORY INITIALIZED >> ${name.toUpperCase()}`);
-      setSelectedRuleId(id);
-      loadRules();
-    } catch {
-      flash('// WRITE ERROR', true);
+      if (newId) setSelectedRuleId(newId);
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
     }
   };
 
   const handleDeleteCategory = async (rule, e) => {
     e.stopPropagation();
     try {
-      await db.remove(rule);
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      conf.income_categories = (conf.income_categories || []).filter(c => c !== rule.category_name);
-      conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== rule.category_name);
-      conf.expense_categories = (conf.expense_categories || []).filter(c => c !== rule.category_name);
-
-      await db.put(conf);
-
+      await deleteCategory(rule);
       if (selectedRuleId === rule._id) setSelectedRuleId('');
       flash(`// CATEGORY EXPUNGED >> ${rule.category_name.toUpperCase()}`);
-      loadRules();
-    } catch {
-      flash('// WRITE ERROR', true);
+    } catch (err) {
+      flash(`// ${err.message || 'WRITE ERROR'}`, true);
     }
   };
 
@@ -294,32 +189,13 @@ const HoloSlide = ({ data, db, userId }) => {
     e.stopPropagation();
     const newName = editName.trim();
     if (!newName || !editingRule) return;
-
-    const rule = rules.find(r => r._id === editingRule._id);
-    if (!rule) return;
-
-    const oldName = rule.category_name;
-
     try {
-      await db.put({ ...rule, category_name: newName, updated: new Date().toISOString() });
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      conf.income_categories = (conf.income_categories || []).map(c => c === oldName ? newName : c);
-      conf.neutral_categories = (conf.neutral_categories || []).map(c => c === oldName ? newName : c);
-      conf.expense_categories = (conf.expense_categories || []).map(c => c === oldName ? newName : c);
-
-      await db.put(conf);
-
+      await renameCategory(editingRule._id, newName);
       flash(`// CATEGORY RENAMED >> ${newName.toUpperCase()}`);
       setEditingRule(null);
       setEditName('');
-      loadRules();
-    } catch {
-      flash('// WRITE ERROR', true);
+    } catch (err) {
+      flash(`// ${err.message || 'WRITE ERROR'}`, true);
     }
   };
 

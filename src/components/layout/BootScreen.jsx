@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AudioCore } from '../../utils/audioCore';
+import { couchLogin } from '../../utils/couchAuth';
 
 // ◈ COUCHDB HOST CONFIG ◈
 const COUCHDB_HOST = "192.168.29.100:5984";
@@ -51,7 +52,7 @@ const BootScreen = ({ onComplete }) => {
 
   const [username, setUsername]         = useState('');
   const [password, setPassword]         = useState('');
-  const [host, setHost] = useState(localStorage.getItem('COGITATOR_UPLINK_HOST') || '192.168.29.100:5984');
+  const [host, setHost] = useState(localStorage.getItem('COGITATOR_UPLINK_HOST') || 'laptop-lg23d2mc.taild8bd6e.ts.net/db');
   const [showHostEdit, setShowHostEdit] = useState(false);
   const [authError, setAuthError]       = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -59,21 +60,16 @@ const BootScreen = ({ onComplete }) => {
 
   const terminalRef = useRef(null);
 
-  // ◈ PRE-FILL CACHED CREDENTIALS ◈
+  // ◈ PRE-FILL CACHED USERNAME ◈
+  // The password is NEVER persisted any more — only the username,
+  // and only as a UX hint. Auth requires re-typing the password on
+  // every cold launch. Cookie session (set by POST /_session) keeps
+  // the in-app session alive between requests; the in-memory
+  // password is the Basic-Auth fallback while HTTPS migration is
+  // still pending (browsers block cross-origin HTTP cookies).
   useEffect(() => {
-    const token = localStorage.getItem('mech_auth_token');
-    if (token) {
-      try {
-        const decoded = atob(token);
-        const [savedUser, savedPass] = decoded.split(':');
-        if (savedUser && savedPass) {
-          setUsername(savedUser);
-          setPassword(savedPass);
-        }
-      } catch (e) {
-        console.error('◈ SCRAP CODE IN CACHE: TOKEN REJECTED ◈');
-      }
-    }
+    const savedUser = localStorage.getItem('mech_username');
+    if (savedUser) setUsername(savedUser);
   }, []);
 
   // Auto-scroll terminal
@@ -130,6 +126,14 @@ const BootScreen = ({ onComplete }) => {
   }, [phase, currentLineIndex, currentCharIndex, onComplete, username, password]);
 
   // ── Auth handler ──────────────────────────────────────────────
+  // Authenticates via CouchDB's /_session endpoint instead of a raw
+  // Basic-Auth fetch. On success:
+  //   * CouchDB sets an HttpOnly AuthSession cookie scoped to the
+  //     CouchDB origin. The cookie is unreadable from JS, so XSS
+  //     can no longer exfiltrate the session.
+  //   * Only the username is persisted (UX prefill). The password
+  //     is passed to onComplete() and lives in React state for the
+  //     session only — never touches disk.
   const handleAuth = async () => {
     if (!username.trim() || !password.trim()) {
       setAuthError('// ERROR: CREDENTIALS INCOMPLETE');
@@ -141,39 +145,45 @@ const BootScreen = ({ onComplete }) => {
 
     const cleanUser = username.trim();
     const cleanPass = password.trim();
-    const token     = btoa(`${cleanUser}:${cleanPass}`);
-
-    // ◈ DYNAMIC HOST DETECTION ◈
-    const protocol = 'http://';
 
     try {
-      const headers = new Headers();
-      headers.set('Authorization', 'Basic ' + token);
-
-      // ◈ DYNAMIC PROTOCOL APPLIED ◈
-      const response = await fetch(`${protocol}${host}/metadata_vault`, { method: 'GET', headers });
-
-      if (response.ok) {
-        localStorage.setItem('mech_auth_token', token);
-        setAuthError('');
-        setIsAuthenticating(false);
-        setPhase('prompt');           // ← go to initiate screen, not terminal
-      } else if (response.status === 401) {
+      await couchLogin(host, cleanUser, cleanPass);
+      localStorage.setItem('mech_username', cleanUser);
+      setAuthError('');
+      setIsAuthenticating(false);
+      setPhase('prompt');
+    } catch (err) {
+      // We got an HTTP response back — server is reachable, problem
+      // is with the request/auth, not the network. Show a specific
+      // error instead of falling into "offline mode".
+      if (err?.status === 401) {
         setAuthError('// ERROR: CREDENTIALS REJECTED');
         setIsAuthenticating(false);
-      } else {
-        setAuthError('// ERROR: VAULT LOCKDOWN ACTIVE');
-        setIsAuthenticating(false);
+        return;
       }
-    } catch (err) {
-      const cachedToken = localStorage.getItem('mech_auth_token');
-      if (cachedToken === token) {
+      if (err?.status === 404) {
+        // Almost certainly the host string is missing the /db path
+        // prefix (Tailscale serves the React app at / and proxies
+        // /db/* to CouchDB).
+        setAuthError('// ERROR: SESSION ENDPOINT NOT FOUND — CHECK HOST PATH');
+        setIsAuthenticating(false);
+        return;
+      }
+      if (err?.status) {
+        setAuthError(`// ERROR: VAULT REJECTED REQUEST [${err.status}]`);
+        setIsAuthenticating(false);
+        return;
+      }
+      // No status field → fetch threw without a response (DNS failure,
+      // connection refused, TLS error, CORS, …). Genuinely offline.
+      const cachedUser = localStorage.getItem('mech_username');
+      if (cachedUser === cleanUser) {
         setIsOffline(true);
         setAuthError('// WARNING: OFFLINE MODE ENGAGED');
         setTimeout(() => {
           setAuthError('');
           setIsAuthenticating(false);
-          setPhase('prompt');         // ← offline also goes to prompt
+          setPhase('prompt');
         }, 1200);
       } else {
         setAuthError('// ERROR: VAULT UNREACHABLE & NO CACHE FOUND');

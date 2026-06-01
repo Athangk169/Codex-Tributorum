@@ -1,0 +1,19 @@
+Texture sources
+===============
+
+terra_base.jpg
+  Source : earth_lights_2048.png from the three.js examples repo
+           https://github.com/mrdoob/three.js/tree/master/examples/textures/planets
+  Origin : NASA Earth Observatory (Suomi NPP / DMSP-OLS Earth at Night composite)
+  License: NASA imagery is public domain. The three.js examples directory is
+           distributed under the MIT license.
+
+baal_base.jpg
+  Source : marsmap1k.jpg from jeromeetienne/threex.planets
+           https://github.com/jeromeetienne/threex.planets/tree/master/images
+  Origin : NASA / JPL Viking Orbiter color mosaic
+  License: NASA imagery is public domain. The threex.planets repo is
+           distributed under the MIT license.
+
+Both images are used only as starting samples in a procedural bake shader;
+the planet surfaces rendered on screen are not the source images themselves.

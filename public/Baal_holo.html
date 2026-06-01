@@ -1,1144 +1,261 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BAAL — PLANETARY SURVEY</title>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
+    <link rel="stylesheet" href="holo/holo.css" />
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      body {
-        background: #000;
-        overflow: hidden;
-        font-family: "Courier New", monospace;
-        touch-action: none;
-        user-select: none;
-      }
+      :root {
+        /* base accent */
+        --accent:           #ff3300;
+        --accent-soft:      rgba(255, 50, 0, 0.7);
+        --accent-strong:    rgba(255, 50, 0, 0.7);
+        --accent-dim:       rgba(200, 60, 0, 0.55);
+        --accent-glow:      rgba(255, 50, 0, 0.3);
+        --accent-glow-inset:rgba(255, 50, 0, 0.08);
+        --accent-pulse:     rgba(255, 80, 0, 0.6);
+        --accent-pulse-inset:rgba(255, 50, 0, 0.15);
+        --accent-hover:     rgba(255, 40, 0, 0.15);
 
-      /* ── PICT-CASTER GLITCH ── */
-      @keyframes pictGlitch {
-        0% {
-          filter: drop-shadow(4px 0px 0px rgba(255, 0, 0, 0.8))
-            drop-shadow(-4px 0px 0px rgba(0, 255, 255, 0.8));
-          transform: translate(2px, -2px);
-        }
-        25% {
-          filter: drop-shadow(-4px 0px 0px rgba(255, 0, 0, 0.8))
-            drop-shadow(4px 0px 0px rgba(0, 255, 255, 0.8));
-          transform: translate(-2px, 2px);
-        }
-        50% {
-          filter: drop-shadow(2px 0px 0px rgba(255, 0, 0, 0.8))
-            drop-shadow(-2px 0px 0px rgba(0, 255, 255, 0.8));
-          transform: translate(0px, 0px);
-        }
-        75% {
-          filter: drop-shadow(-2px 0px 0px rgba(255, 0, 0, 0.8))
-            drop-shadow(2px 0px 0px rgba(0, 255, 255, 0.8));
-          transform: translate(1px, -1px);
-        }
-        100% {
-          filter: none;
-          transform: translate(0, 0);
-        }
-      }
-      .glitching {
-        animation: pictGlitch 0.25s steps(2) forwards;
-      }
+        --loading:          #cc2200;
+        --loading-bg:       rgba(200, 30, 0, 0.2);
+        --loading-glow:     #ff3300;
 
-      #loading {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: #000;
-        z-index: 1000;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 18px;
-      }
-      #loading-text {
-        color: #cc2200;
-        font-size: clamp(10px, 2vw, 13px);
-        letter-spacing: 4px;
-      }
-      #loading-bar-wrap {
-        width: 200px;
-        height: 2px;
-        background: rgba(200, 30, 0, 0.2);
-      }
-      #loading-bar {
-        height: 2px;
-        background: #cc2200;
-        width: 0%;
-        transition: width 0.3s;
-        box-shadow: 0 0 8px #ff3300;
-      }
+        --corner:           rgba(200, 40, 0, 0.5);
 
-      #hud-top {
-        position: absolute;
-        top: 16px;
-        left: 16px;
-        text-align: left;
-        pointer-events: none;
-        z-index: 10;
-      }
-      #title {
-        color: #ff3300;
-        font-size: clamp(11px, 2.5vw, 15px);
-        letter-spacing: 6px;
-        text-shadow: 0 0 12px rgba(255, 50, 0, 0.8);
-      }
-      #subtitle {
-        color: rgba(200, 60, 0, 0.55);
-        font-size: clamp(7px, 1.2vw, 9px);
-        letter-spacing: 4px;
-        margin-top: 4px;
-      }
+        --scan-a:           rgba(255, 60, 0, 0.4);
+        --scan-b:           rgba(255, 100, 0, 0.7);
 
-      #hud-corners {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 5;
-      }
-      .corner {
-        position: absolute;
-        width: 24px;
-        height: 24px;
-        border-color: rgba(200, 40, 0, 0.5);
-        border-style: solid;
-      }
-      .corner.tl {
-        top: 12px;
-        left: 12px;
-        border-width: 2px 0 0 2px;
-      }
-      .corner.tr {
-        top: 12px;
-        right: 12px;
-        border-width: 2px 2px 0 0;
-      }
-      .corner.bl {
-        bottom: 12px;
-        left: 12px;
-        border-width: 0 0 2px 2px;
-      }
-      .corner.br {
-        bottom: 12px;
-        right: 12px;
-        border-width: 0 2px 2px 0;
-      }
+        --label:            #ff4400;
+        --label-shadow:     rgba(255, 60, 0, 0.9);
+        --label-border:     rgba(255, 68, 0, 0.5);
+        --label-dot:        #ff1100;
+        --label-dot-glow:   #ff4400;
+        --label-dot-aura:   rgba(255, 60, 0, 0.5);
+        --label-dot-strong: #ff6600;
+        --label-dot-strong-aura: rgba(255, 100, 0, 0.7);
 
-      #scan-bar {
-        position: absolute;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: linear-gradient(
-          to right,
-          transparent,
-          rgba(255, 60, 0, 0.4),
-          rgba(255, 100, 0, 0.7),
-          rgba(255, 60, 0, 0.4),
-          transparent
-        );
-        pointer-events: none;
-        z-index: 5;
-        animation: scanMove 4s linear infinite;
-      }
-      @keyframes scanMove {
-        0% {
-          top: 0%;
-        }
-        100% {
-          top: 100%;
-        }
-      }
+        --sweep-a:          rgba(255, 40, 0, 0.03);
+        --sweep-b:          rgba(255, 80, 0, 0.12);
+        --sweep-c:          rgba(255, 120, 0, 0.06);
+        --point-glow:       rgba(255, 100, 0, 0.9);
+        --point-aura:       rgba(255, 40, 0, 0.5);
+        --beam:             rgba(255, 80, 0, 0.6);
+        --noise:            rgba(255, 40, 0, 0.04);
 
-      #labels {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 10;
-      }
-      .label {
-        position: absolute;
-        color: #ff4400;
-        font-size: clamp(8px, 1.5vw, 11px);
-        font-weight: bold;
-        text-shadow: 0 0 6px rgba(255, 60, 0, 0.9);
-        white-space: nowrap;
-        padding-left: 14px;
-        border-bottom: 1px solid rgba(255, 68, 0, 0.5);
-        animation: labelPulse 3s ease-in-out infinite;
-      }
-      .label::before {
-        content: "";
-        position: absolute;
-        left: 0;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 5px;
-        height: 5px;
-        background: #ff1100;
-        border-radius: 50%;
-        box-shadow: 0 0 6px #ff4400, 0 0 12px rgba(255, 60, 0, 0.5);
-        animation: markerPulse 2s ease-in-out infinite;
-      }
-      @keyframes labelPulse {
-        0%,
-        100% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.7;
-        }
-      }
-      @keyframes markerPulse {
-        0%,
-        100% {
-          box-shadow: 0 0 6px #ff4400, 0 0 12px rgba(255, 60, 0, 0.5);
-        }
-        50% {
-          box-shadow: 0 0 10px #ff6600, 0 0 20px rgba(255, 100, 0, 0.7);
-        }
-      }
+        --stop:             rgba(255, 50, 0, 0.7);
+        --stop-border:      rgba(255, 50, 0, 0.4);
 
-      #hud-bottom {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        padding: 16px;
-        pointer-events: none;
-        z-index: 10;
-      }
-      #hud-info {
-        color: rgba(200, 60, 0, 0.5);
-        font-size: clamp(7px, 1.1vw, 9px);
-        line-height: 1.8;
-        letter-spacing: 1px;
-      }
-
-      #startup-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 20;
-        overflow: hidden;
-      }
-      #startup-sweep {
-        position: absolute;
-        left: 0;
-        width: 100%;
-        height: 60%;
-        bottom: -60%;
-        background: linear-gradient(
-          to top,
-          transparent 0%,
-          rgba(255, 40, 0, 0.03) 40%,
-          rgba(255, 80, 0, 0.12) 70%,
-          rgba(255, 120, 0, 0.06) 85%,
-          transparent 100%
-        );
-        transition: none;
-      }
-      #startup-point {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        width: 4px;
-        height: 4px;
-        border-radius: 50%;
-        background: #fff;
-        box-shadow: 0 0 6px 2px #fff, 0 0 20px 6px rgba(255, 100, 0, 0.9),
-          0 0 60px 20px rgba(255, 40, 0, 0.5);
-        opacity: 0;
-      }
-      #startup-beam {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 2px;
-        height: 50vh;
-        transform: translateX(-50%);
-        background: linear-gradient(to bottom, rgba(255, 80, 0, 0.6), transparent);
-        opacity: 0;
-        clip-path: polygon(40% 0%, 60% 0%, 100% 100%, 0% 100%);
-      }
-      #startup-noise {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        opacity: 0;
-        background-image: repeating-linear-gradient(
-          0deg,
-          transparent,
-          transparent 3px,
-          rgba(255, 40, 0, 0.04) 3px,
-          rgba(255, 40, 0, 0.04) 4px
-        );
-      }
-
-      #launch-ui {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 50;
-        text-align: center;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 16px;
-      }
-      #btn-launch {
-        background: rgba(0, 0, 0, 0.85);
-        color: #ff3300;
-        border: 1px solid rgba(255, 50, 0, 0.7);
-        padding: 14px 36px;
-        cursor: pointer;
-        text-transform: uppercase;
-        letter-spacing: 4px;
-        font-family: "Courier New", monospace;
-        font-size: 12px;
-        box-shadow: 0 0 20px rgba(255, 50, 0, 0.3),
-          inset 0 0 12px rgba(255, 50, 0, 0.08);
-        transition: all 0.2s;
-        animation: btnPulse 2.5s ease-in-out infinite;
-      }
-      #btn-launch:hover {
-        background: rgba(255, 40, 0, 0.15);
-        box-shadow: 0 0 40px rgba(255, 50, 0, 0.7);
-      }
-      @keyframes btnPulse {
-        0%,
-        100% {
-          box-shadow: 0 0 20px rgba(255, 50, 0, 0.3),
-            inset 0 0 12px rgba(255, 50, 0, 0.08);
-        }
-        50% {
-          box-shadow: 0 0 40px rgba(255, 80, 0, 0.6),
-            inset 0 0 16px rgba(255, 50, 0, 0.15);
-        }
-      }
-
-      #btn-stop {
-        display: none;
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 50;
-        background: rgba(0, 0, 0, 0.85);
-        color: rgba(255, 50, 0, 0.7);
-        border: 1px solid rgba(255, 50, 0, 0.4);
-        padding: 8px 20px;
-        cursor: pointer;
-        text-transform: uppercase;
-        letter-spacing: 3px;
-        font-family: "Courier New", monospace;
-        font-size: 9px;
-        transition: all 0.2s;
-      }
-      #btn-stop:hover {
-        color: #ff3300;
-        box-shadow: 0 0 20px rgba(255, 50, 0, 0.4);
-        border-color: rgba(255, 50, 0, 0.85);
-      }
-
-      /* HIDE EVERYTHING ON LOAD */
-      #hud-top,
-      #hud-corners,
-      #scan-bar,
-      #labels,
-      #hud-bottom,
-      #startup-overlay {
-        opacity: 0;
-        pointer-events: none;
+        --screen-divider:   rgba(255, 50, 0, 0.3);
+        --lore:             rgba(255, 100, 0, 0.85);
+        --placeholder:      rgba(200, 60, 0, 0.4);
+        --placeholder-border: rgba(200, 60, 0, 0.3);
       }
     </style>
+
+    <script src="three.min.js"></script>
+    <script src="holo/holo-core.js"></script>
   </head>
   <body>
-    <div id="launch-ui">
-      <div
-        style="
-          color: rgba(200, 60, 0, 0.5);
-          font-family: 'Courier New', monospace;
-          font-size: 9px;
-          letter-spacing: 4px;
-        "
-      >
-        [ MECHANICUS STELLAR ARCHIVE ]
-      </div>
-      <button id="btn-launch" onclick="launchHolo()">
-        ⬡ INITIATE PROJECTION
-      </button>
-    </div>
-
-    <button id="btn-stop" onclick="collapseHolo()">■ TERMINATE SIGNAL</button>
-
-    <div id="loading">
-      <div id="loading-text">[ ACCESSING MECHANICUS STELLAR ARCHIVE ]</div>
-      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
-    </div>
-
-    <div id="hud-top">
-      <div id="title">[ PLANETARY SURVEY : BAAL ]</div>
-      <div id="subtitle">
-        BLOOD ANGELS HOMEWORLD — SEGMENTUM TEMPESTUS — REF: 001–BAAL–PRIME
-      </div>
-    </div>
-
-    <div id="hud-corners">
-      <div class="corner tl"></div>
-      <div class="corner tr"></div>
-      <div class="corner bl"></div>
-      <div class="corner br"></div>
-    </div>
-
-    <div id="scan-bar"></div>
-
-    <div id="startup-overlay">
-      <div id="startup-noise"></div>
-      <div id="startup-beam"></div>
-      <div id="startup-sweep"></div>
-      <div id="startup-point"></div>
-    </div>
-
-    <div id="labels"></div>
-
-    <div id="hud-bottom">
-      <div id="hud-info">
-        CLASS: DEAD WORLD<br />
-        STATUS: IRRADIATED<br />
-        TITHE: ADEPTUS ASTARTES
-      </div>
-    </div>
-
-    <div
-      id="loc-screen"
-      style="
-        display: none;
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: clamp(280px, 60vw, 600px);
-        background: rgba(0, 0, 0, 0.92);
-        border: 1px solid rgba(255, 50, 0, 0.7);
-        z-index: 100;
-        font-family: 'Courier New', monospace;
-        color: #ff3300;
-        box-shadow: 0 0 40px rgba(255, 40, 0, 0.3);
-      "
-    >
-      <div
-        style="
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 10px 16px;
-          border-bottom: 1px solid rgba(255, 50, 0, 0.3);
-        "
-      >
-        <span id="screen-title" style="letter-spacing: 4px; font-size: clamp(9px, 1.5vw, 12px);"></span>
-        <span onclick="closeScreen()" style="cursor: pointer; font-size: 18px; opacity: 0.7;">✕</span>
-      </div>
-      <div
-        style="
-          padding: 24px;
-          min-height: 180px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 24px;
-        "
-      >
-        <div id="screen-lore" style="color: rgba(255, 100, 0, 0.85); font-size: 11px; line-height: 1.8; letter-spacing: 2px; text-align: center; max-width: 90%;"></div>
-        <span
-          id="screen-placeholder"
-          style="color: rgba(200, 60, 0, 0.4); letter-spacing: 3px; font-size: 10px; border-top: 1px dashed rgba(200, 60, 0, 0.3); padding-top: 12px; display: none;"
-          >[ VISUAL FEED PENDING UPLINK ]</span
-        >
-      </div>
-    </div>
-
     <script>
-      let holoActive = false;
-      let collapseAnim = false;
-      let collapseT = 0;
-      let startupPhase = 0;
-      let startupT = 0;
-      const STARTUP_DUR = 3.2;
-      let activeTimeouts = [];
-
-      const W = window.innerWidth,
-        H = window.innerHeight;
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 2000);
-      camera.position.z = 42;
-
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setSize(W, H);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      document.body.appendChild(renderer.domElement);
-
-      function setProgress(p) {
-        document.getElementById("loading-bar").style.width = p + "%";
-      }
-      setProgress(10);
-
       // ==========================================
-      // TEXTURE GENERATION
+      // BAAL TEXTURE BAKE
+      // Uses a NASA Mars Viking color mosaic as the surface base, then
+      // shader-transforms it into Baal: deeper blood-red hue, polar ice
+      // caps replaced with rust/cinder (Baal has no ice), dried-blood
+      // streaks, additional crater shadowing. Procedural noise breaks
+      // up obvious Mars landmarks so it doesn't read as "just Mars".
       // ==========================================
-      function bakeBaalTexture() {
-        const BAKE_SIZE = 2048;
-        const bakeScene = new THREE.Scene();
-        const bakeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const bakeMat = new THREE.ShaderMaterial({
-          uniforms: {},
-          vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
-          fragmentShader: `
-      varying vec2 vUv;
-      float hash21(vec2 p) { p = fract(p * vec2(127.319, 311.874)); p += dot(p, p + 38.45); return fract(p.x * p.y); }
-      float smoothNoise(vec2 p) {
-        vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash21(i + vec2(0,0)), hash21(i + vec2(1,0)), u.x), mix(hash21(i + vec2(0,1)), hash21(i + vec2(1,1)), u.x), u.y);
-      }
-      float fbm(vec2 p, float lacunarity, float gain) {
-        float v = 0.0, amp = 0.5, maxVal = 0.0;
-        for (int i = 0; i < 9; i++) { v += amp * smoothNoise(p); maxVal += amp; amp *= gain; p = p * lacunarity + vec2(1.732, 9.184); }
-        return v / maxVal;
-      }
-      float warpedFbm(vec2 p, float oct) {
-        vec2 q = vec2(fbm(p + vec2(0.0, 0.0), 2.1, 0.5), fbm(p + vec2(5.2, 1.3), 2.1, 0.5));
-        return fbm(p + 1.2 * q, 2.0, 0.5);
-      }
-      float crater(vec2 uv, vec2 center, float radius) {
-        float d = length(uv - center) / radius;
-        if (d > 1.5) return 0.0;
-        float interior = smoothstep(0.0, 0.65, d);
-        float rim = exp(-pow((d - 0.9) * 6.0, 2.0));
-        float ejecta = smoothstep(1.5, 0.95, d) * 0.3;
-        return -0.45 * (1.0 - interior) + 0.6 * rim + ejecta;
-      }
-      void main() {
-        vec2 uv = vUv;
-        float macro   = fbm(uv * 4.5, 2.05, 0.52);
-        float meso    = fbm(uv * 11.0 + vec2(4.2, 1.9), 2.1, 0.48);
-        float micro   = fbm(uv * 26.0 + vec2(7.7, 3.3), 2.2, 0.45);
-        float warped  = warpedFbm(uv * 5.5 + vec2(2.1, 8.0), 6.0);
-        float h = macro * 0.50 + meso * 0.25 + micro * 0.12 + warped * 0.13;
-        h = clamp(h, 0.0, 1.0);
-        float c = 0.0;
-        c += crater(uv, vec2(0.188, 0.274), 0.082); c += crater(uv, vec2(0.712, 0.605), 0.132);
-        c += crater(uv, vec2(0.502, 0.140), 0.062); c += crater(uv, vec2(0.848, 0.238), 0.094);
-        c += crater(uv, vec2(0.143, 0.762), 0.073); c += crater(uv, vec2(0.604, 0.873), 0.053);
-        c += crater(uv, vec2(0.382, 0.542), 0.042); c += crater(uv, vec2(0.914, 0.698), 0.063);
-        c += crater(uv, vec2(0.297, 0.913), 0.081); c += crater(uv, vec2(0.748, 0.382), 0.057);
-        c += crater(uv, vec2(0.450, 0.718), 0.038); c += crater(uv, vec2(0.079, 0.452), 0.051);
-        c += crater(uv, vec2(0.563, 0.312), 0.044); c += crater(uv, vec2(0.332, 0.167), 0.036);
-        c += crater(uv, vec2(0.824, 0.841), 0.046);
-        h = clamp(h + c * 0.35, 0.0, 1.0);
-        vec3 deepShadow = vec3(0.025, 0.005, 0.000); vec3 darkCinder = vec3(0.180, 0.040, 0.008);
-        vec3 rustDark   = vec3(0.420, 0.095, 0.018); vec3 rustMid    = vec3(0.680, 0.170, 0.040);
-        vec3 burnOrange = vec3(0.830, 0.290, 0.070); vec3 dustOchre  = vec3(0.900, 0.500, 0.160);
-        vec3 col; float t = h;
-        if      (t < 0.15) col = mix(deepShadow, darkCinder, t / 0.15);
-        else if (t < 0.32) col = mix(darkCinder, rustDark,   (t - 0.15) / 0.17);
-        else if (t < 0.52) col = mix(rustDark,   rustMid,    (t - 0.32) / 0.20);
-        else if (t < 0.72) col = mix(rustMid,    burnOrange, (t - 0.52) / 0.20);
-        else               col = mix(burnOrange, dustOchre,  (t - 0.72) / 0.28);
-        float latFactor = abs(uv.y - 0.5) * 2.0; col *= 1.0 - latFactor * latFactor * 0.55;
-        float streak = fbm(vec2(uv.x * 40.0, uv.y * 3.0), 2.0, 0.5) * 0.08; col += streak * vec3(0.9, 0.45, 0.1);
-        gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
-      }
-    `,
+      function loadImageTex(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            const tex = new THREE.Texture(img);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.ClampToEdgeWrapping;
+            tex.minFilter = THREE.LinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            tex.needsUpdate = true;
+            resolve(tex);
+          };
+          img.onerror = () => reject(new Error("Failed to load " + src));
+          img.src = src;
         });
-        bakeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bakeMat));
-        const target = new THREE.WebGLRenderTarget(BAKE_SIZE, BAKE_SIZE, {
+      }
+
+      async function bakeBaalTexture(renderer) {
+        const marsTex = await loadImageTex("holo/textures/baal_base.jpg");
+
+        const SZ_W = 2048, SZ_H = 1024;  // equirectangular 2:1
+        const bakeScene = new THREE.Scene();
+        const bakeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const mat = new THREE.ShaderMaterial({
+          uniforms: { marsMap: { value: marsTex } },
+          vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }",
+          fragmentShader: `
+            uniform sampler2D marsMap;
+            varying vec2 vUv;
+
+            float hash21(vec2 p) { p = fract(p * vec2(127.319, 311.874)); p += dot(p, p + 38.45); return fract(p.x * p.y); }
+            float sn(vec2 p) { vec2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f); return mix(mix(hash21(i),hash21(i+vec2(1,0)),u.x), mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),u.x),u.y); }
+            float fbm(vec2 p) { float v=0.0,a=0.5; for(int i=0;i<5;i++){ v+=a*sn(p); a*=0.5; p=p*2.0+vec2(1.7,9.2); } return v; }
+
+            void main() {
+              vec2 uv = vUv;
+
+              // Sample Mars; warp slightly so famous Mars features (Olympus
+              // Mons, Valles Marineris) don't read as themselves.
+              float warpX = fbm(uv * 3.5) * 0.06;
+              float warpY = fbm(uv * 3.5 + vec2(11.2, 7.7)) * 0.04;
+              vec3 mars = texture2D(marsMap, uv + vec2(warpX, warpY)).rgb;
+              float light = dot(mars, vec3(0.299, 0.587, 0.114));
+
+              // Push hue toward blood-red: amp red, suppress green/blue.
+              vec3 blood = vec3(mars.r * 1.20, mars.g * 0.45, mars.b * 0.18);
+
+              // Deeper rust in low-luminance areas (crater shadows, basins).
+              vec3 cinder = vec3(0.42, 0.10, 0.025);
+              float darkness = 1.0 - light;
+              blood = mix(blood, cinder * blood.r * 1.8, darkness * 0.45);
+
+              // Polar caps are pure ice on Mars; Baal has none. Detect them
+              // by lightness + latitude, replace with cinder/dust.
+              float polarLat = clamp((abs(uv.y - 0.5) * 2.0 - 0.78) * 5.0, 0.0, 1.0);
+              float capMask = polarLat * smoothstep(0.55, 0.90, light);
+              vec3 dust = vec3(0.55, 0.16, 0.04);
+              blood = mix(blood, dust, capMask);
+
+              // Dried-blood streaks running east-west.
+              float streak = fbm(vec2(uv.x * 48.0, uv.y * 2.5)) * 0.18;
+              blood += vec3(0.85, 0.18, 0.02) * streak * 0.55;
+
+              // Crater-edge highlight: bright rim where Mars is bright AND
+              // adjacent to a darker patch. Approximated with high-freq noise.
+              float rimNoise = sn(uv * 180.0);
+              float rim = step(0.92, rimNoise) * smoothstep(0.30, 0.65, light) * 0.6;
+              blood += vec3(1.0, 0.45, 0.10) * rim;
+
+              // Fine grain across the whole surface.
+              float grain = (sn(uv * 1100.0) - 0.5) * 0.08;
+              blood += vec3(grain, grain * 0.5, grain * 0.2);
+
+              // Equatorial heat band (subtle warmer wash near equator).
+              float eqBand = exp(-pow((uv.y - 0.5) * 3.0, 2.0)) * 0.08;
+              blood += vec3(1.0, 0.35, 0.05) * eqBand;
+
+              // Limb darkening hint (drops brightness near top/bottom of UV).
+              float latFactor = abs(uv.y - 0.5) * 2.0;
+              blood *= 1.0 - latFactor * latFactor * 0.30;
+
+              gl_FragColor = vec4(clamp(blood, 0.0, 1.0), 1.0);
+            }
+          `
+        });
+        bakeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+        const target = new THREE.WebGLRenderTarget(SZ_W, SZ_H, {
           minFilter: THREE.LinearFilter,
           magFilter: THREE.LinearFilter,
           format: THREE.RGBFormat,
-          encoding: THREE.sRGBEncoding,
+          encoding: THREE.sRGBEncoding
         });
         renderer.setRenderTarget(target);
-        renderer.render(bakeScene, bakeCamera);
+        renderer.render(bakeScene, bakeCam);
         renderer.setRenderTarget(null);
-        bakeMat.dispose();
+        mat.dispose();
+        marsTex.dispose();
+        target.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        target.texture.userData = target.texture.userData || {};
+        target.texture.userData.renderTarget = target;
         return target.texture;
       }
 
-      const atmosphereMat = new THREE.ShaderMaterial({
-        uniforms: {
-          glowColor: { value: new THREE.Color(1.0, 0.25, 0.04) },
-          intensity: { value: 1.2 },
-        },
-        vertexShader: `varying vec3 vWorldNormal; varying vec3 vWorldPos; void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPos = wp.xyz; vWorldNormal = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: `uniform vec3 glowColor; uniform float intensity; varying vec3 vWorldNormal; varying vec3 vWorldPos; void main() { vec3 viewDir = normalize(cameraPosition - vWorldPos); float rim = 1.0 - max(0.0, dot(normalize(vWorldNormal), viewDir)); rim = pow(rim, 2.8); float alpha = rim * 0.75 * intensity; gl_FragColor = vec4(glowColor * rim, alpha); }`,
-        transparent: true,
-        side: THREE.FrontSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-
-      let sceneGroup, wireframe, stormMat;
-
-      function buildScene(baalTex) {
-        const starGeo = new THREE.BufferGeometry();
-        const starCount = 4000;
-        const starPos = new Float32Array(starCount * 3);
-        const starColors = new Float32Array(starCount * 3);
-        for (let i = 0; i < starCount; i++) {
-          const r = 800 + Math.random() * 400;
-          const theta = Math.random() * Math.PI * 2;
-          const phi = Math.acos(2 * Math.random() - 1);
-          starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-          starPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-          starPos[i * 3 + 2] = r * Math.cos(phi);
-          const warm = Math.random() * 0.3;
-          starColors[i * 3] = 0.8 + warm;
-          starColors[i * 3 + 1] = 0.75 + warm * 0.5;
-          starColors[i * 3 + 2] = 0.7;
-        }
-        starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
-        starGeo.setAttribute("color", new THREE.BufferAttribute(starColors, 3));
-        scene.add(
-          new THREE.Points(
-            starGeo,
-            new THREE.PointsMaterial({
-              size: 0.6,
-              sizeAttenuation: true,
-              vertexColors: true,
-              transparent: true,
-              opacity: 0.9,
-            })
-          )
-        );
-
-        const planetGeo = new THREE.SphereGeometry(15, 128, 128);
-        const planetMat = new THREE.MeshStandardMaterial({
-          map: baalTex,
-          roughness: 0.88,
-          metalness: 0.04,
-          envMapIntensity: 0.1,
-        });
-        const planet = new THREE.Mesh(planetGeo, planetMat);
-
-        // ◈ HOLOGRAPHIC LATITUDE RINGS ◈
-        function makeLatLine(latDeg, col, opa) {
-          const latR = latDeg * Math.PI / 180;
-          const r = 15.08 * Math.cos(latR), y = 15.08 * Math.sin(latR);
-          const pts = [];
-          for (let i = 0; i <= 128; i++) { const a = i / 128 * Math.PI * 2; pts.push(new THREE.Vector3(r * Math.cos(a), y, r * Math.sin(a))); }
-          return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: opa, blending: THREE.AdditiveBlending, depthWrite: false }));
-        }
-        wireframe = new THREE.Group();
-        wireframe.add(makeLatLine(0,   0xff3300, 0.18));
-        wireframe.add(makeLatLine(30,  0xff2200, 0.09));
-        wireframe.add(makeLatLine(-30, 0xff2200, 0.09));
-        wireframe.add(makeLatLine(60,  0xff1800, 0.05));
-        wireframe.add(makeLatLine(-60, 0xff1800, 0.05));
-
-        // ◈ RAD-STORM ATMOSPHERICS ◈
-        stormMat = new THREE.ShaderMaterial({
+      // ==========================================
+      // BAAL EXTRAS (rad-storm sphere)
+      // ==========================================
+      function buildBaalExtras({ sceneGroup }) {
+        const stormMat = new THREE.ShaderMaterial({
           uniforms: { time: { value: 0 } },
-          vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+          vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
           fragmentShader: `
-      uniform float time; varying vec2 vUv;
-      float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
-      float noise(vec2 p){
-        vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
-        return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x),u.y);
-      }
-      float fbm(vec2 p){ float v=0.,a=0.5; for(int i=0;i<4;i++){v+=a*noise(p);a*=0.5;p*=2.0;} return v; }
-      void main(){
-        vec2 p = vUv * 6.0; p.x += time * 0.03;
-        float n = fbm(p + fbm(p + time*0.02));
-        float mask = smoothstep(0.4, 0.8, n);
-        gl_FragColor = vec4(1.0, 0.3, 0.0, mask * 0.35);
-      }
-    `,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        });
-        const radStorm = new THREE.Mesh(
-          new THREE.SphereGeometry(15.2, 64, 64),
-          stormMat
-        );
-
-        const atmGeo = new THREE.SphereGeometry(15.75, 64, 64);
-        const atmosphere = new THREE.Mesh(atmGeo, atmosphereMat);
-
-        function makeRing(inner, outer, color, opacity, tiltX) {
-          const geo = new THREE.RingGeometry(inner, outer, 128);
-          const mat = new THREE.MeshBasicMaterial({
-            color,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-          });
-          const mesh = new THREE.Mesh(geo, mat);
-          mesh.rotation.x = tiltX;
-          return { mesh, mat };
-        }
-
-        const ring1 = makeRing(17.2, 17.5, 0xff2200, 0.35, Math.PI / 2);
-        const ring2 = makeRing(16.0, 16.15, 0xff4400, 0.55, Math.PI / 2);
-        const ring3 = makeRing(18.5, 18.6, 0xff1100, 0.2, Math.PI / 2.8);
-
-        const scanGeo = new THREE.PlaneGeometry(32, 0.08);
-        const scanMat = new THREE.MeshBasicMaterial({
-          color: 0xff5500,
-          transparent: true,
-          opacity: 0.6,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
-        });
-        const scanPlane = new THREE.Mesh(scanGeo, scanMat);
-
-        sceneGroup = new THREE.Group();
-        sceneGroup.add(
-          planet,
-          wireframe,
-          radStorm,
-          atmosphere,
-          ring1.mesh,
-          ring2.mesh,
-          ring3.mesh,
-          scanPlane
-        );
-        scene.add(sceneGroup);
-        sceneGroup.scale.setScalar(0);
-
-        const sunLight = new THREE.DirectionalLight(0xff9955, 1.3);
-        sunLight.position.set(-6, 2, 5);
-        scene.add(sunLight);
-        scene.add(new THREE.AmbientLight(0x1a0500, 0.9));
-        const rimLight = new THREE.DirectionalLight(0xff2200, 0.25);
-        rimLight.position.set(5, -1, -6);
-        scene.add(rimLight);
-
-        return { planet, atmosphere, ring1, ring2, ring3, scanPlane, scanMat };
-      }
-
-      // ==========================================
-      // LORE CORRECTED LOCATION DATA
-      // ==========================================
-      const LOC_DATA = [
-        { name: "ARX ANGELICUM", lat: 22, lon: 48, id: "arx", desc: "FORTRESS-MONASTERY OF THE IX LEGION. RED GRAIL VAULTS SECURE. PRIMARY GARRISON RESPONSIVE." },
-        { name: "MOUNT SERAPH", lat: -10, lon: -120, id: "seraph", desc: "MAXIMUM ELEVATION POINT. EXTREME RAD-STORM ACTIVITY DETECTED. SURFACE HABITABILITY ZERO." },
-        { name: "THE GREAT SALT WASTE", lat: -45, lon: 80, id: "salt", desc: "DESICCATED OCEAN BED. TOXIC MINERAL DEPOSITS. NO KNOWN BIOMASS." },
-        { name: "THE DUST SEAS", lat: 55, lon: -40, id: "dust", desc: "SHIFTING DUNES OF IRRADIATED SILICATE. NOMADIC FIRE SCORPION PREDATOR PRESENCE CONFIRMED." },
-        { name: "KANEDON RUINS", lat: 15, lon: 160, id: "kanedon", desc: "PRE-IMPERIAL HAB-RUINS. TECH-HERESY QUARANTINE IN EFFECT. SCAVENGING PROHIBITED." },
-      ];
-
-      function initLabels(planet) {
-        const labelContainer = document.getElementById("labels");
-
-        // ◈ 3D TACTICAL BEACONS ◈
-        const beaconGeo = new THREE.CylinderGeometry(0.04, 0.04, 3, 8);
-        beaconGeo.rotateX(Math.PI / 2); // Align to Z axis for lookAt
-        beaconGeo.translate(0, 0, 1.5); // Shift base to origin
-        const beaconMat = new THREE.MeshBasicMaterial({
-          color: 0xff4400,
-          transparent: true,
-          opacity: 0.6,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        });
-
-        return LOC_DATA.map((p) => {
-          const div = document.createElement("div");
-          div.className = "label";
-          div.textContent = p.name;
-          div.style.pointerEvents = "all";
-          div.style.cursor = "pointer";
-          div.addEventListener("click", () => openScreen(p));
-          labelContainer.appendChild(div);
-
-          const phi = (90 - p.lat) * (Math.PI / 180);
-          const theta = (p.lon + 180) * (Math.PI / 180);
-          const pos = new THREE.Vector3(
-            -(15 * Math.sin(phi) * Math.cos(theta)),
-            15 * Math.cos(phi),
-            15 * Math.sin(phi) * Math.sin(theta)
-          );
-
-          // Attach beacon to planet so it rotates with it
-          const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-          beacon.position.copy(pos);
-          beacon.lookAt(pos.clone().multiplyScalar(2));
-          planet.add(beacon);
-
-          return { el: div, pos };
-        });
-      }
-
-      function updateLabels(points, planet) {
-        planet.updateMatrixWorld();
-        points.forEach((p) => {
-          const vec = p.pos.clone().applyMatrix4(planet.matrixWorld);
-          const cameraDist = vec.distanceTo(camera.position);
-          const planetDist = planet.position.distanceTo(camera.position);
-          if (cameraDist > planetDist || sceneGroup.scale.x < 0.1) {
-            p.el.style.display = "none";
-          } else {
-            p.el.style.display = "block";
-            vec.project(camera);
-            p.el.style.left = (vec.x * 0.5 + 0.5) * window.innerWidth + "px";
-            p.el.style.top =
-              -(vec.y * 0.5 - 0.5) * window.innerHeight + "px";
-          }
-        });
-      }
-
-      const sfxUp = new Audio("/sounds/holo_up.mp3");
-      sfxUp.volume = 0.7;
-      const sfxDown = new Audio("/sounds/holo_down.mp3");
-      sfxDown.volume = 0.7;
-
-      let rotY = 0.0,
-        rotX = 0.0;
-      let targetRotY = 0.0,
-        targetRotX = 0.0;
-      let isDragging = false,
-        isPaused = false;
-      let lastX = 0,
-        lastY = 0;
-      let autoSpeed = 0.003;
-
-      function onDown(x, y) {
-        isDragging = true;
-        lastX = x;
-        lastY = y;
-      }
-      function onMove(x, y) {
-        if (!isDragging) return;
-        targetRotY += (x - lastX) * 0.006;
-        targetRotX += (y - lastY) * 0.006;
-        targetRotX = Math.max(
-          -Math.PI / 2.2,
-          Math.min(Math.PI / 2.2, targetRotX)
-        );
-        lastX = x;
-        lastY = y;
-      }
-      function onUp() {
-        isDragging = false;
-      }
-
-      document.addEventListener("mousedown", (e) => onDown(e.clientX, e.clientY));
-      document.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
-      document.addEventListener("mouseup", onUp);
-      document.addEventListener(
-        "touchstart",
-        (e) => onDown(e.touches[0].clientX, e.touches[0].clientY),
-        { passive: true }
-      );
-      document.addEventListener(
-        "touchmove",
-        (e) => {
-          e.preventDefault();
-          onMove(e.touches[0].clientX, e.touches[0].clientY);
-        },
-        { passive: false }
-      );
-      document.addEventListener("touchend", onUp);
-      window.addEventListener("resize", () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      });
-
-      function openScreen(loc) {
-        isPaused = true;
-        document.body.classList.add("glitching");
-        setTimeout(() => document.body.classList.remove("glitching"), 300);
-        document.getElementById("screen-title").textContent = "[ " + loc.name + " ]";
-        
-        const loreEl = document.getElementById("screen-lore");
-        const placeholder = document.getElementById("screen-placeholder");
-        
-        // Reset elements for the animation
-        loreEl.textContent = "";
-        placeholder.style.display = "none";
-        document.getElementById("loc-screen").style.display = "block";
-
-        // Clear any ongoing typing from previous clicks
-        if(window.typewriterInterval) clearInterval(window.typewriterInterval);
-        
-        let i = 0;
-        const text = loc.desc;
-        
-        // Typewriter effect
-        window.typewriterInterval = setInterval(() => {
-          // Add a random character glitch 5% of the time to sell the "decryption" vibe
-          if (Math.random() > 0.95 && i < text.length - 1) {
-             const scrapChars = "X#01>";
-             loreEl.textContent = text.substring(0, i) + scrapChars[Math.floor(Math.random() * scrapChars.length)];
-          } else {
-             loreEl.textContent = text.substring(0, i + 1);
-             i++;
-          }
-          
-          // Finish typing
-          if (i >= text.length) {
-            clearInterval(window.typewriterInterval);
-            // Flash the pending UI after text is done
-            setTimeout(() => {
-              placeholder.style.display = "block";
-              placeholder.classList.add("glitching");
-            }, 400);
-          }
-        }, 30); // Speed of the text printing
-      }
-      
-      function closeScreen() {
-        isPaused = false;
-        document.getElementById("loc-screen").style.display = "none";
-      }
-
-      function clearStartupTimeouts() {
-        activeTimeouts.forEach(clearTimeout);
-        activeTimeouts = [];
-      }
-
-      function launchHolo() {
-        if (holoActive) return;
-        holoActive = true;
-        sfxUp.currentTime = 0;
-        sfxUp.play().catch((e) => console.warn("◈ VOX UPLINK BLOCKED:", e));
-        document.getElementById("launch-ui").style.transition = "opacity 0.4s";
-        document.getElementById("launch-ui").style.opacity = "0";
-        setTimeout(() => (document.getElementById("launch-ui").style.display = "none"), 400);
-
-        [
-          "hud-top",
-          "hud-corners",
-          "scan-bar",
-          "labels",
-          "hud-bottom",
-          "startup-overlay",
-        ].forEach((id) => {
-          const el = document.getElementById(id);
-          if (el) {
-            el.style.transition = "opacity 0.01s";
-            el.style.opacity = "1";
-            if (id === "labels" || id === "hud-bottom") el.style.pointerEvents = "";
-          }
-        });
-        activeTimeouts.push(
-          setTimeout(() => {
-            document.getElementById("btn-stop").style.display = "block";
-          }, STARTUP_DUR * 1000)
-        );
-        triggerStartup();
-      }
-
-      function collapseHolo() {
-        if (!holoActive || collapseAnim) return;
-        collapseAnim = true;
-        collapseT = 0;
-        sfxDown.currentTime = 0;
-        sfxDown.play().catch((e) => console.warn("◈ VOX TERMINATION BLOCKED:", e));
-        clearStartupTimeouts();
-
-        ["hud-top", "hud-corners", "scan-bar", "labels", "hud-bottom"].forEach(
-          (id) => {
-            const el = document.getElementById(id);
-            if (el) {
-              el.style.transition = "opacity 0.5s";
-              el.style.opacity = "0";
-              el.style.pointerEvents = "none";
+            uniform float time; varying vec2 vUv;
+            float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+            float noise(vec2 p) {
+              vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x),
+                         mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
             }
-          }
-        );
-
-        document.getElementById("startup-overlay").style.display = "none";
-        const sweep = document.getElementById("startup-sweep");
-        sweep.style.transition = "none";
-        sweep.style.bottom = "-60%";
-        document.getElementById("btn-stop").style.display = "none";
+            float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); a *= 0.5; p *= 2.0; } return v; }
+            void main() {
+              vec2 p = vUv * 6.0; p.x += time * 0.03;
+              float n = fbm(p + fbm(p + time * 0.02));
+              float mask = smoothstep(0.4, 0.8, n);
+              gl_FragColor = vec4(1.0, 0.3, 0.0, mask * 0.35);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+        const radStorm = new THREE.Mesh(new THREE.SphereGeometry(15.2, 64, 64), stormMat);
+        sceneGroup.add(radStorm);
+        return {
+          update(time) { stormMat.uniforms.time.value = time; }
+        };
       }
 
-      function triggerStartup() {
-        startupPhase = 1;
-        startupT = 0;
-        document.getElementById("startup-overlay").style.display = "block";
-        const point = document.getElementById("startup-point");
-        const beam = document.getElementById("startup-beam");
-        const noise = document.getElementById("startup-noise");
-        const sweep = document.getElementById("startup-sweep");
-        const hud = document.getElementById("hud-top");
-        const info = document.getElementById("hud-bottom");
+      // ==========================================
+      // BOOT
+      // ==========================================
+      HoloCore.create({
+        title:        "[ PLANETARY SURVEY : BAAL ]",
+        subtitle:     "BLOOD ANGELS HOMEWORLD — SEGMENTUM TEMPESTUS — REF: 001–BAAL–PRIME",
+        loadingText:  "[ ACCESSING MECHANICUS STELLAR ARCHIVE ]",
+        brand:        "[ MECHANICUS STELLAR ARCHIVE ]",
+        launchLabel:  "⬡ INITIATE PROJECTION",
+        collapseLabel:"■ TERMINATE SIGNAL",
+        hudInfo:      "CLASS: DEAD WORLD<br/>STATUS: IRRADIATED<br/>TITHE: ADEPTUS ASTARTES",
 
-        hud.style.opacity = "0";
-        info.style.opacity = "0";
-        hud.style.transition = "opacity 0.6s ease";
-        info.style.transition = "opacity 0.8s ease";
-        point.style.transition = "opacity 0.08s ease";
-        point.style.opacity = "1";
+        bakeTexture: bakeBaalTexture,
 
-        activeTimeouts.push(
-          setTimeout(() => {
-            beam.style.transition = "opacity 0.2s ease";
-            noise.style.transition = "opacity 0.3s ease";
-            beam.style.opacity = "0.9";
-            noise.style.opacity = "1";
-          }, 100)
-        );
-        activeTimeouts.push(
-          setTimeout(() => {
-            sweep.style.transition = "bottom 2.4s cubic-bezier(0.16, 1, 0.3, 1)";
-            sweep.style.bottom = "100%";
-          }, 300)
-        );
-        activeTimeouts.push(
-          setTimeout(() => {
-            point.style.transition = "opacity 0.5s ease";
-            beam.style.transition = "opacity 0.5s ease";
-            point.style.opacity = "0";
-            beam.style.opacity = "0";
-          }, 1000)
-        );
-        activeTimeouts.push(
-          setTimeout(() => {
-            noise.style.transition = "opacity 1.0s ease";
-            noise.style.opacity = "0";
-            hud.style.opacity = "1";
-            info.style.opacity = "1";
-          }, 2200)
-        );
-        activeTimeouts.push(
-          setTimeout(() => {
-            startupPhase = 2;
-            document.getElementById("startup-overlay").style.display = "none";
-            sweep.style.transition = "none";
-            sweep.style.bottom = "-60%";
-          }, STARTUP_DUR * 1000)
-        );
-      }
+        atmosphere: { color: 0xff4400, radius: 15.75, intensity: 1.2, power: 2.8, alpha: 0.75 },
 
-      let meshes,
-        points;
-      let time = 0;
+        latLines: [
+          { deg: 0,   color: 0xff3300, opacity: 0.18 },
+          { deg: 30,  color: 0xff2200, opacity: 0.09 },
+          { deg: -30, color: 0xff2200, opacity: 0.09 },
+          { deg: 60,  color: 0xff1800, opacity: 0.05 },
+          { deg: -60, color: 0xff1800, opacity: 0.05 }
+        ],
 
-      function init() {
-        setProgress(40);
-        const baalTex = bakeBaalTexture();
-        setProgress(80);
-        meshes = buildScene(baalTex);
-        points = initLabels(meshes.planet);
-        setProgress(100);
-        setTimeout(() => {
-          document.getElementById("loading").style.display = "none";
-        }, 300);
-        animate();
-      }
+        rings: [
+          { inner: 17.2, outer: 17.5,  color: 0xff2200, opacity: 0.35, tiltX: Math.PI / 2,    pulse: { base: 0.28, amp: 0.12, freq: 1.3 } },
+          { inner: 16.0, outer: 16.15, color: 0xff4400, opacity: 0.55, tiltX: Math.PI / 2,    pulse: { base: 0.45, amp: 0.15, freq: 2.1, phase: 1.0 } },
+          { inner: 18.5, outer: 18.6,  color: 0xff1100, opacity: 0.20, tiltX: Math.PI / 2.8,  pulse: { base: 0.12, amp: 0.08, freq: 0.9, phase: 2.5 }, rotZ: 0.08 }
+        ],
 
-      function animate() {
-        requestAnimationFrame(animate);
-        time += 0.016;
+        scan: { color: 0xff5500, opacity: 0.6, speed: 5.5, rotSpeed: 0.4, pulseBase: 0.35, pulseAmp: 0.15, pulseFreq: 4 },
 
-        if (startupPhase === 1) {
-          startupT += 0.016;
-          const t = Math.min(startupT / STARTUP_DUR, 1.0);
-          const ease =
-            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-          const flicker = startupT < 0.6 ? 0.5 + Math.random() * 0.5 : 1.0;
-          sceneGroup.scale.setScalar(ease * flicker);
-        }
+        lights: {
+          sun:     { color: 0xff9955, intensity: 1.3,  position: [-6, 2, 5] },
+          ambient: { color: 0x1a0500, intensity: 0.9 },
+          rim:     { color: 0xff2200, intensity: 0.25, position: [5, -1, -6] }
+        },
 
-        if (collapseAnim) {
-          collapseT += 0.016;
-          const t = Math.min(collapseT / 1.4, 1.0);
-          const ease = 1 - (1 - t) * (1 - t) * (1 - t);
-          const flicker = t > 0.75 ? (Math.random() > 0.15 ? 1.0 : 0.0) : 1.0;
-          sceneGroup.scale.setScalar((1.0 - ease) * flicker);
+        beaconColor: 0xff4400,
 
-          if (t >= 1.0) {
-            collapseAnim = false;
-            holoActive = false;
-            sceneGroup.scale.setScalar(0);
-            startupPhase = 0;
-            startupT = 0;
-            const lu = document.getElementById("launch-ui");
-            lu.style.display = "flex";
-            lu.style.opacity = "0";
-            setTimeout(() => {
-              lu.style.transition = "opacity 0.6s";
-              lu.style.opacity = "1";
-            }, 50);
-          }
-        }
+        locations: [
+          { name: "ARX ANGELICUM",        lat:  22, lon:   48, id: "arx",     desc: "FORTRESS-MONASTERY OF THE IX LEGION. RED GRAIL VAULTS SECURE. PRIMARY GARRISON RESPONSIVE." },
+          { name: "MOUNT SERAPH",         lat: -10, lon: -120, id: "seraph",  desc: "MAXIMUM ELEVATION POINT. EXTREME RAD-STORM ACTIVITY DETECTED. SURFACE HABITABILITY ZERO." },
+          { name: "THE GREAT SALT WASTE", lat: -45, lon:   80, id: "salt",    desc: "DESICCATED OCEAN BED. TOXIC MINERAL DEPOSITS. NO KNOWN BIOMASS." },
+          { name: "THE DUST SEAS",        lat:  55, lon:  -40, id: "dust",    desc: "SHIFTING DUNES OF IRRADIATED SILICATE. NOMADIC FIRE SCORPION PREDATOR PRESENCE CONFIRMED." },
+          { name: "KANEDON RUINS",        lat:  15, lon:  160, id: "kanedon", desc: "PRE-IMPERIAL HAB-RUINS. TECH-HERESY QUARANTINE IN EFFECT. SCAVENGING PROHIBITED." }
+        ],
 
-        if (!isDragging && !isPaused && holoActive && !collapseAnim)
-          targetRotY += autoSpeed;
-        rotY += (targetRotY - rotY) * 0.07;
-        rotX += (targetRotX - rotX) * 0.07;
-
-        meshes.planet.rotation.y = rotY;
-        meshes.planet.rotation.x = rotX;
-        meshes.atmosphere.rotation.y = rotY * 0.98;
-        meshes.atmosphere.rotation.x = rotX;
-
-        // ◈ KINETIC UPDATES ◈
-        if (wireframe) {
-          wireframe.rotation.y = rotY * 1.05;
-          wireframe.rotation.x = rotX * 1.05;
-        }
-        if (stormMat) stormMat.uniforms.time.value = time;
-
-        meshes.ring1.mat.opacity = 0.28 + Math.sin(time * 1.3) * 0.12;
-        meshes.ring2.mat.opacity = 0.45 + Math.sin(time * 2.1 + 1.0) * 0.15;
-        meshes.ring3.mat.opacity = 0.12 + Math.sin(time * 0.9 + 2.5) * 0.08;
-        meshes.ring3.mesh.rotation.z = time * 0.08;
-
-        const scanY = ((time * 5.5) % 36) - 18;
-        meshes.scanPlane.position.y = scanY;
-        meshes.scanPlane.rotation.x = Math.PI / 2;
-        meshes.scanPlane.rotation.z = time * 0.4;
-        meshes.scanMat.opacity = 0.35 + Math.sin(time * 4) * 0.15;
-
-        updateLabels(points, meshes.planet);
-        renderer.render(scene, camera);
-      }
-
-      init();
+        buildExtras: buildBaalExtras
+      });
     </script>
   </body>
 </html>

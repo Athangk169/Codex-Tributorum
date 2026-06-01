@@ -8,6 +8,7 @@ import {
   ObligationsEngine,
   CategorizationEngine
 } from "../utils/engine";
+import { couchEndpoint } from "../utils/couchAuth";
 
 // ─────────────────────────────────────────────────────────────
 // useFinanceData
@@ -29,16 +30,24 @@ export const useFinanceData = (credentials) => {
   const [financeData, setFinanceData] = useState(null);
   const [isLoading, setIsLoading]     = useState(true);
   const [error, setError]             = useState(null);
-  const [syncLed, setSyncLed]         = useState('warn');
+  // Seed from navigator.onLine so an app launched without connectivity
+  // shows "NO SIGNAL" immediately — without waiting for PouchDB's first
+  // failed sync attempt to fire the 'paused' event a few seconds later.
+  const [syncLed, setSyncLed]         = useState(
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'warn'
+  );
   const [dbs, setDbs]                 = useState({ txns: null, meta: null, inv: null });
 
   useEffect(() => {
-    if (!credentials?.username || !credentials?.password) {
+    if (!credentials?.username) {
       console.log("◈ [HOOK] ABORTING: Missing credentials");
       return;
     }
 
-    const { username, password } = credentials;
+    // Only the username is needed at this layer — auth is carried by
+    // the HttpOnly AuthSession cookie set by BootScreen's /_session
+    // POST. The password no longer touches React state past boot.
+    const { username } = credentials;
 
     // ── Local PouchDB instances ──
     const dbTransactions = new PouchDB("finances");
@@ -48,24 +57,33 @@ export const useFinanceData = (credentials) => {
     setDbs({ txns: dbTransactions, meta: dbMetadata, inv: dbInvestments });
 
     // ── Remote sync setup ──
+    //
+    // App and CouchDB are now same-origin HTTPS (tailscale serve handles
+    // both `/` and `/db` on the same hostname), so the HttpOnly
+    // AuthSession cookie set by BootScreen's /_session call is reliably
+    // attached to every sync request via `credentials: 'include'`. The
+    // in-memory Basic-Auth fallback that used to live here has been
+    // removed — the password no longer needs to be kept in React state
+    // for the lifetime of the session, which closes off the only path
+    // by which a future XSS could exfiltrate the password.
     const setupSync = (db, dbName) => {
-      const savedHost = localStorage.getItem('COGITATOR_UPLINK_HOST') || '192.168.29.100:5984';
+      const savedHost = localStorage.getItem('COGITATOR_UPLINK_HOST') || 'laptop-lg23d2mc.taild8bd6e.ts.net/db';
+      // Same normalisation as couchAuth — strips trailing slashes and
+      // prepends the protocol if absent. Avoids double-slash URLs.
+      const remoteUrl = `${couchEndpoint(savedHost)}/${dbName}`;
 
-      // Use https for Tailscale ts.net hostnames, http for local IPs
-      const protocol = savedHost.includes('ts.net') ? 'https://' : 'http://';
-      const remoteUrl = `${protocol}${savedHost}/${dbName}`;
+      const cookieFetch = (url, opts = {}) =>
+        fetch(url, { ...opts, credentials: 'include' });
 
-      return db.sync(remoteUrl, {
+      const remote = new PouchDB(remoteUrl, {
+        skip_setup: true,
+        // Auth flows entirely through the HttpOnly AuthSession cookie.
+        fetch: cookieFetch,
+      });
+
+      return db.sync(remote, {
         live:  true,
         retry: true,
-        auth:  { username, password },
-        ajax:  {
-          timeout:         30000,
-          withCredentials: true,
-          headers: {
-            'Authorization': 'Basic ' + btoa(username + ':' + password)
-          }
-        }
       });
     };
 
@@ -100,6 +118,61 @@ export const useFinanceData = (credentials) => {
       s.on('error',   handleSyncError);
       s.on('denied',  handleSyncError);
     });
+
+    // Browser-level connectivity events. PouchDB's sync events tell us
+    // about CouchDB reachability, but the browser knows about device-
+    // level connectivity changes (wifi dropped, airplane mode toggled)
+    // before any sync attempt would fire. Reflect those immediately so
+    // the uplink LED tracks reality without a polling delay.
+    const handleOnline  = () => setSyncLed('warn');   // retry begins; 'change' will promote to 'ok'
+    const handleOffline = () => setSyncLed('offline');
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online',  handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
+
+    // ── Direct health-check probe ──
+    // `navigator.onLine` only tells us about device connectivity, not
+    // whether CouchDB itself is reachable. If the phone has wifi but
+    // Tailscale is off (or the laptop is asleep, or CouchDB is down),
+    // PouchDB's sync attempt can take 30s+ to time out before
+    // `paused(err)` finally fires — that's far too slow.
+    //
+    // Probe `${endpoint}/` directly with a 4s abort timeout. CouchDB
+    // returns 401/200 on the welcome route, so any HTTP response — even
+    // 401 — means the server is reachable. A network-level failure
+    // (DNS, connect refused, abort) means it isn't.
+    //
+    // While offline, re-probe every 15s. As soon as a probe succeeds,
+    // we hand back to PouchDB's sync events (which will fire 'change'
+    // → 'ok' once data flows).
+    const savedHost = localStorage.getItem('COGITATOR_UPLINK_HOST') || 'laptop-lg23d2mc.taild8bd6e.ts.net/db';
+    const probeUrl  = `${couchEndpoint(savedHost)}/`;
+
+    const probeOnce = async () => {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        await fetch(probeUrl, {
+          method: 'GET',
+          credentials: 'include',
+          signal: ctrl.signal,
+          cache: 'no-store',
+        });
+        // Any HTTP response (200, 401, 403, 404, …) = server is talking
+        // back. Only network-level errors throw here.
+        setSyncLed(prev => (prev === 'offline' ? 'warn' : prev));
+        return true;
+      } catch (_e) {
+        setSyncLed('offline');
+        return false;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    probeOnce();
+    const probeIv = setInterval(probeOnce, 15000);
 
     // ── Seeding: copy Sanguinius rules to a new user on first login ──
     const categorySlug = (categoryName) =>
@@ -210,8 +283,55 @@ export const useFinanceData = (credentials) => {
             ObligationsEngine.getSummary(dbMetadata, dbTransactions, username),
           ]);
 
-        const aggregateDebt = (cardResults?.buckets || [])
-          .reduce((acc, b) => acc + (b.outstanding || 0), 0);
+        // ── Genesis snapshot — marks the first reliable month ──
+        // Anything before this was imported from the legacy system.
+        let genesisMonth = null;
+        try {
+          const snaps = await dbMetadata.allDocs({
+            include_docs: true,
+            startkey: `finance:snapshot:${username}:`,
+            endkey:   `finance:snapshot:${username}:￿`
+          });
+          const genesisDoc = snaps.rows
+            .map(r => r.doc)
+            .find(d => d?.type === 'finance:snapshot' && d?.is_genesis);
+          genesisMonth = genesisDoc?.month || null;
+        } catch (_) {}
+
+        // ── Aggregate buckets across ALL cards (not just default) ──
+        // cardResults from CardEngine.buildBuckets(..., null) only covers the
+        // default card. For the Overview "BLOOD DEBT" KPI and the per-date
+        // breakdown we need every card's buckets, merged by due_date.
+        const allCardResults = await Promise.all(
+          (cards || []).map(c =>
+            CardEngine.buildBuckets(dbTransactions, dbMetadata, username, c._id)
+          )
+        );
+
+        const todayIso = new Date().toISOString().substring(0, 10);
+        const mergedByDate = new Map();
+        allCardResults.forEach(r => {
+          (r?.buckets || []).forEach(b => {
+            if ((b.outstanding || 0) <= 0) return;
+            const cur = mergedByDate.get(b.due_date) || {
+              due_date: b.due_date, outstanding: 0, cards: []
+            };
+            cur.outstanding += b.outstanding;
+            if (r.card?.name) cur.cards.push({ name: r.card.name, outstanding: b.outstanding });
+            mergedByDate.set(b.due_date, cur);
+          });
+        });
+
+        const allBuckets = Array.from(mergedByDate.values())
+          .sort((a, b) => a.due_date.localeCompare(b.due_date))
+          .map(b => ({ ...b, status: b.due_date < todayIso ? 'overdue' : 'outstanding' }));
+
+        const aggregateDebt = allBuckets.reduce((s, b) => s + b.outstanding, 0);
+
+        const cardObligationsCombined = {
+          ...(cardResults || {}),
+          allBuckets,
+        };
 
         // ── Category config ──
         let expenseCategories  = [];
@@ -265,7 +385,7 @@ export const useFinanceData = (credentials) => {
           setFinanceData({
             ...results,
             liveBalances:       liveBalances || { accounts: [], total: 0 },
-            cardObligations:    cardResults,
+            cardObligations:    cardObligationsCombined,
             totalDebt:          aggregateDebt,
             accounts:           accounts || [],
             cards:              cards    || [],
@@ -274,6 +394,7 @@ export const useFinanceData = (credentials) => {
             neutralCategories,
             trends:             trends || [],
             arByTag:            arByTag || {},
+            genesisMonth,
             obligations:        obligations || {
               recurring: [], loans: [], emis: [],
               totalMonthlyLoad: 0, recurringMonthlyLoad: 0,
@@ -320,11 +441,16 @@ export const useFinanceData = (credentials) => {
 
     return () => {
       clearTimeout(debounceTimer);
+      clearInterval(probeIv);
       localTxnChanges.cancel();
       localMetaChanges.cancel();
       syncTxns.cancel();
       syncMeta.cancel();
       syncInv.cancel();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online',  handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
     };
 
   }, [credentials]);

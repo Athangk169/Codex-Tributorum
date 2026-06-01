@@ -189,8 +189,18 @@ const OBL_STYLES = `
     font-family:   var(--mono);
   }
   .obl-card-badge.moratorium { background: rgba(234,179,8,0.1);  border: 1px solid #eab308; color: #eab308; }
-  .obl-card-badge.repayment  { background: rgba(74,222,128,0.1); border: 1px solid var(--border-hi); color: var(--border-hi); }
-  .obl-card-badge.active     { background: rgba(74,222,128,0.1); border: 1px solid var(--border-hi); color: var(--border-hi); }
+  .obl-card-badge.repayment  { background: rgba(201,168,76,0.1); border: 1px solid var(--ba-gold-dim); color: var(--ba-gold); }
+  .obl-card-badge.active     { background: rgba(201,168,76,0.1); border: 1px solid var(--ba-gold-dim); color: var(--ba-gold); }
+  .obl-card-badge.discharged { background: rgba(74,222,128,0.12); border: 1px solid var(--border-hi); color: var(--border-hi); }
+  .obl-auto-flag {
+    font-size: 9px; margin-left: 4px; color: var(--ba-gold-dim);
+    cursor: help; opacity: 0.85;
+  }
+  .obl-rec-editing {
+    background: rgba(201,168,76,0.08);
+    box-shadow: inset 0 0 14px rgba(201,168,76,0.18);
+    border-left: 2px solid var(--ba-gold-dim);
+  }
 
   .obl-card-body {
     padding:  12px 16px;
@@ -230,10 +240,15 @@ const OBL_STYLES = `
   .obl-progress-fill {
     height:     100%;
     border-radius:1px;
+    min-width:  3px;            /* always show a tick, even at 0% */
     transition: width 0.6s ease;
   }
   .obl-progress-fill.loan { background: linear-gradient(90deg, var(--ba-crimson), #ff6633); box-shadow: 0 0 8px rgba(204,34,0,0.4); }
   .obl-progress-fill.emi  { background: linear-gradient(90deg, var(--border-hi), #88ffcc);  box-shadow: 0 0 8px rgba(74,222,128,0.3); }
+
+  /* Projection table zebra striping */
+  .obl-proj-tbody tr:nth-child(even) { background: rgba(201,168,76,0.04); }
+  .obl-proj-tbody tr:hover           { background: rgba(204,34,0,0.08); }
 
   /* Card actions */
   .obl-card-actions {
@@ -374,7 +389,7 @@ const freqLabel = (freq, interval = 1) => {
 };
 
 // ── Currency helper ────────────────────────────────────────────
-const fmt = (n) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
+const fmt = (n) => `${Math.round(n || 0).toLocaleString('en-IN')}`;
 
 // ── Blank form states ──────────────────────────────────────────
 const BLANK_REC = {
@@ -446,9 +461,13 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   const [statusMsg, setStatusMsg] = useState(null);
   const [expandedLoan, setExpandedLoan] = useState(null);
   const [editingLoanId, setEditingLoanId] = useState(null);
+  const [editingRecId, setEditingRecId] = useState(null);
+  const [editingEmiId, setEditingEmiId] = useState(null);
   const [lastTouchedId, setLastTouchedId] = useState(null);
   const [loanLogTarget, setLoanLogTarget] = useState(null);
   const [loanLogForm, setLoanLogForm] = useState(blankLoanLog);
+  const [emiPayTarget, setEmiPayTarget] = useState(null);
+  const [emiPayForm, setEmiPayForm] = useState({ amount: '', date: new Date().toISOString().substring(0, 10) });
 
   const obligations = data?.obligations || {
     recurring: [], loans: [], emis: [],
@@ -476,31 +495,60 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   };
 
   // ── Recurring handlers ───────────────────────────────────────
-  const handleAddRecurring = async () => {
+  const resetRecForm = () => {
+    setRecForm(BLANK_REC);
+    setEditingRecId(null);
+    setShowRecForm(false);
+  };
+
+  const handleSaveRecurring = async () => {
     if (!recForm.name || !recForm.amount) return;
     setSaving(true);
-    const result = await ObligationsEngine.addRecurring({
+    const payload = {
       ...recForm,
       amount:             Number(recForm.amount),
       tolerance:          Number(recForm.tolerance) / 100,
       frequency_interval: Number(recForm.frequency_interval),
       day_of_cycle:       Number(recForm.day_of_cycle),
       keywords:           recForm.keywords.split(',').map(k => k.trim()).filter(Boolean)
-    }, dbMetadata, userId);
+    };
+    const result = editingRecId
+      ? await ObligationsEngine.updateRecurring(editingRecId, payload, dbMetadata, userId)
+      : await ObligationsEngine.addRecurring(payload, dbMetadata, userId);
     setSaving(false);
     if (result.ok) {
-      flash('Recurring expense declared');
-      markTouched(result.id);
-      setRecForm(BLANK_REC);
-      setShowRecForm(false);
+      flash(editingRecId ? 'Recurring expense updated' : 'Recurring expense declared');
+      markTouched(result.id || result.doc?._id || editingRecId);
+      resetRecForm();
     } else {
       flash(result.error || 'Failed', 'error');
     }
   };
 
+  const handleEditRecurring = (rec) => {
+    setRecForm({
+      name:               rec.name || '',
+      amount:             String(rec.amount ?? ''),
+      tolerance:          String(Math.round((rec.tolerance ?? 0.1) * 100)),
+      frequency:          rec.frequency || 'monthly',
+      frequency_interval: String(rec.frequency_interval ?? 1),
+      start_date:         rec.start_date || new Date().toISOString().substring(0, 10),
+      day_of_cycle:       String(rec.day_of_cycle ?? 1),
+      category:           rec.category || '',
+      account:            rec.account || '',
+      match_by:           rec.match_by || 'category+account',
+      keywords:           Array.isArray(rec.keywords) ? rec.keywords.join(', ') : (rec.keywords || ''),
+      notes:              rec.notes || ''
+    });
+    setEditingRecId(rec._id);
+    setShowRecForm(true);
+  };
+
   const handleDeleteRecurring = async (id) => {
+    if (!window.confirm('Remove this recurring expense? History remains intact.')) return;
     await ObligationsEngine.deleteRecurring(id, dbMetadata, userId);
     flash('Recurring expense removed');
+    if (editingRecId === id) resetRecForm();
   };
 
   // ── Loan handlers ────────────────────────────────────────────
@@ -651,14 +699,14 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   // ── EMI handlers ─────────────────────────────────────────────
   const handleDeleteLoan = async (loan) => {
     if (!loan || !dbMetadata || !userId) return;
-    if (!window.confirm(`Close ${loan.name || 'this loan'}? Transaction history will be preserved.`)) return;
+    if (!window.confirm(`Discharge ${loan.name || 'this loan'}? Transaction history will be preserved.`)) return;
 
     setSaving(true);
     const result = await ObligationsEngine.deleteLoan(loan._id, dbMetadata, userId);
     setSaving(false);
 
     if (result.ok) {
-      flash('Loan closed');
+      flash('Loan discharged');
       if (expandedLoan === loan._id) setExpandedLoan(null);
       if (loanLogTarget?.loanId === loan._id) {
         setLoanLogTarget(null);
@@ -669,16 +717,96 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     }
   };
 
-  const handleAddEMI = async () => {
+  const resetEmiForm = () => {
+    setEmiForm(BLANK_EMI);
+    setEditingEmiId(null);
+    setShowEmiForm(false);
+  };
+
+  const handleSaveEMI = async () => {
     if (!emiForm.name || !emiForm.emi_amount) return;
     setSaving(true);
-    const result = await ObligationsEngine.addEMI(emiForm, dbMetadata, userId);
+    const result = editingEmiId
+      ? await ObligationsEngine.updateEMI(editingEmiId, {
+          ...emiForm,
+          total_amount:   Number(emiForm.total_amount) || 0,
+          down_payment:   Number(emiForm.down_payment) || 0,
+          emi_amount:     Number(emiForm.emi_amount)   || 0,
+          tenure_months:  Number(emiForm.tenure_months) || 0,
+          interest_rate:  Number(emiForm.interest_rate) || 0,
+        }, dbMetadata, userId)
+      : await ObligationsEngine.addEMI(emiForm, dbMetadata, userId);
     setSaving(false);
     if (result.ok) {
-      flash('EMI purchase declared');
-      markTouched(result.id);
-      setEmiForm(BLANK_EMI);
-      setShowEmiForm(false);
+      flash(editingEmiId ? 'EMI updated' : 'EMI purchase declared');
+      markTouched(result.id || result.doc?._id || editingEmiId);
+      resetEmiForm();
+    } else {
+      flash(result.error || 'Failed', 'error');
+    }
+  };
+
+  const handleEditEMI = (emi) => {
+    setEmiForm({
+      name:           emi.name || '',
+      total_amount:   String(emi.total_amount ?? ''),
+      down_payment:   String(emi.down_payment ?? '0'),
+      emi_amount:     String(emi.emi_amount ?? ''),
+      tenure_months:  String(emi.tenure_months ?? '12'),
+      interest_rate:  String(emi.interest_rate ?? '0'),
+      account:        emi.account || '',
+      purchase_date:  emi.purchase_date || new Date().toISOString().substring(0, 10),
+      first_emi_date: emi.first_emi_date || '',
+      category:       emi.category || '',
+      notes:          emi.notes || ''
+    });
+    setEditingEmiId(emi._id);
+    setShowEmiForm(true);
+  };
+
+  const openEmiPay = (emi) => {
+    if (emiPayTarget === emi._id) {
+      setEmiPayTarget(null);
+      return;
+    }
+    setEmiPayTarget(emi._id);
+    setEmiPayForm({
+      amount: String(emi.emi_amount || ''),
+      date:   new Date().toISOString().substring(0, 10),
+    });
+  };
+
+  const handleEmiPaySubmit = async (emi) => {
+    if (!emi || !dbTransactions || !dbMetadata || !userId) return;
+    const amount = Number(emiPayForm.amount);
+    if (!amount || amount <= 0 || !emiPayForm.date) {
+      flash('Amount and date required', 'error');
+      return;
+    }
+    setSaving(true);
+    const result = await ObligationsEngine.recordEMIPayment(
+      emi._id, amount, emiPayForm.date, dbTransactions, dbMetadata, userId
+    );
+    setSaving(false);
+    if (result.ok) {
+      flash('EMI payment logged');
+      markTouched(emi._id);
+      setEmiPayTarget(null);
+    } else {
+      flash(result.error || 'Failed', 'error');
+    }
+  };
+
+  const handleDischargeEMI = async (emi) => {
+    if (!emi || !dbMetadata || !userId) return;
+    if (!window.confirm(`Discharge ${emi.name || 'this EMI'}? History will be preserved.`)) return;
+    setSaving(true);
+    const result = await ObligationsEngine.deleteEMI(emi._id, dbMetadata, userId);
+    setSaving(false);
+    if (result.ok) {
+      flash('EMI discharged');
+      if (editingEmiId === emi._id) resetEmiForm();
+      if (emiPayTarget === emi._id) setEmiPayTarget(null);
     } else {
       flash(result.error || 'Failed', 'error');
     }
@@ -777,7 +905,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                       </div>
                     ) : (
                       recurring.map(({ item, status, dueDate, daysUntilDue, daysOverdue }) => (
-                        <div key={item._id} className={`obl-rec-row${lastTouchedId === item._id ? ' obl-highlight' : ''}`}>
+                        <div key={item._id} className={`obl-rec-row${lastTouchedId === item._id ? ' obl-highlight' : ''}${editingRecId === item._id ? ' obl-rec-editing' : ''}`}>
                           <span className={`obl-rec-status ${status}`} />
                           <span className="obl-rec-name">{item.name}</span>
                           <span className="obl-rec-freq">
@@ -794,6 +922,11 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                             : 'PENDING'}
                           </span>
                           <button
+                            className="action-btn"
+                            onClick={() => handleEditRecurring(item)}
+                            title="Edit recurring"
+                          >EDIT</button>
+                          <button
                             className="action-btn del"
                             onClick={() => handleDeleteRecurring(item._id)}
                             title="Remove recurring"
@@ -808,7 +941,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                     <button
                       className="mech-btn"
                       style={{ marginTop: 0 }}
-                      onClick={() => setShowRecForm(f => !f)}
+                      onClick={() => showRecForm ? resetRecForm() : setShowRecForm(true)}
                     >
                       {showRecForm ? 'CANCEL' : '+ DECLARE RECURRING EXPENSE'}
                     </button>
@@ -821,7 +954,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                 {showRecForm ? (
                   <div className="obl-form-wrap obl-reveal" style={{ flex: 1, overflowY: 'auto' }}>
                     <div className="obl-section-hdr" style={{ marginBottom: '14px' }}>
-                      DECLARE RECURRING EXPENSE
+                      {editingRecId ? 'EDIT RECURRING EXPENSE' : 'DECLARE RECURRING EXPENSE'}
                     </div>
 
                     <div className="obl-form-grid">
@@ -829,7 +962,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         onChange={v => setRecForm(f => ({ ...f, name: v }))}
                         onBlur={handleRecurringNameBlur}
                         placeholder="Netflix" />
-                      <Input label="AMOUNT (₹)" type="number" value={recForm.amount}
+                      <Input label="AMOUNT" type="number" value={recForm.amount}
                         onChange={v => setRecForm(f => ({ ...f, amount: v }))} placeholder="649" />
                       <Input label="TOLERANCE (%)" type="number" value={recForm.tolerance}
                         onChange={v => setRecForm(f => ({ ...f, tolerance: v }))} placeholder="10" />
@@ -896,10 +1029,12 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
 
                     <button
                       className="mech-btn"
-                      onClick={handleAddRecurring}
+                      onClick={handleSaveRecurring}
                       disabled={saving || !recForm.name || !recForm.amount}
                     >
-                      {saving ? 'DECLARING...' : 'AUTHORIZE & DECLARE'}
+                      {saving
+                        ? (editingRecId ? 'UPDATING...' : 'DECLARING...')
+                        : (editingRecId ? 'AUTHORIZE & UPDATE'   : 'AUTHORIZE & DECLARE')}
                     </button>
                   </div>
                 ) : (
@@ -958,7 +1093,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                 </div>
               </div>
               <div className="obl-stat-chip">
-                <div className="obl-stat-chip-label">TOTAL OUTSTANDING</div>
+                <div className="obl-stat-chip-label">LIABILITY PRINCIPAL</div>
                 <div className="obl-stat-chip-val overdue">
                   <ScrambleText
                     text={fmt(
@@ -1008,9 +1143,9 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                     />
                   </div>
                   <div className="obl-form-grid">
-                    <Input label="SANCTIONED (₹)" type="number" value={loanForm.sanctioned_amount}
+                    <Input label="SANCTIONED" type="number" value={loanForm.sanctioned_amount}
                       onChange={v => setLoanForm(f => ({ ...f, sanctioned_amount: v }))} placeholder="2000000" />
-                    <Input label="DRAWN SO FAR (₹)" type="number" value={loanForm.disbursed_amount}
+                    <Input label="DRAWN SO FAR" type="number" value={loanForm.disbursed_amount}
                       onChange={v => setLoanForm(f => ({ ...f, disbursed_amount: v }))} placeholder="800000" />
                     <Input label="INTEREST RATE (%)" type="number" step="0.1" value={loanForm.interest_rate}
                       onChange={v => setLoanForm(f => ({ ...f, interest_rate: v }))} placeholder="10.5" />
@@ -1026,7 +1161,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                       onChange={v => setLoanForm(f => ({ ...f, emi_day: v }))} placeholder="5" />
                   </div>
                   <div className="obl-form-grid">
-                    <Input label="EMI AMOUNT (₹)" type="number" value={loanForm.emi}
+                    <Input label="EMI AMOUNT" type="number" value={loanForm.emi}
                       onChange={v => setLoanForm(f => ({ ...f, emi: v }))} placeholder="25000" />
                     <Input label="TENURE (MONTHS)" type="number" value={loanForm.tenure_months}
                       onChange={v => setLoanForm(f => ({ ...f, tenure_months: v }))} placeholder="120" />
@@ -1081,7 +1216,12 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                           {loan.loan_type?.toUpperCase()} · {loan.rate_type?.toUpperCase()}
                         </span>
                         <span className={`obl-card-badge ${phase}`}>
-                          {phase?.toUpperCase()}{autoPhase ? ' AUTO' : ''}
+                          {phase === 'repayment' ? 'PENANCE' : phase?.toUpperCase()}
+                          {autoPhase && (
+                            <span className="obl-auto-flag" title={`Auto-flipped from ${storedPhase?.toUpperCase()} based on dates`}>
+                              ⟳
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -1113,6 +1253,18 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         <span className="obl-card-lbl">MONTHLY INTEREST</span>
                         <span className="obl-card-val" style={{ color: 'var(--ba-gold)' }}>
                           <ScrambleText text={fmt(bal.nextInterestDue || 0)} speed={60} step={0.2} />
+                        </span>
+                      </div>
+                      <div className="obl-card-row">
+                        <span className="obl-card-lbl">PRINCIPAL PAID</span>
+                        <span className="obl-card-val ok">
+                          <ScrambleText text={fmt(bal.principalPaid || 0)} speed={60} step={0.2} />
+                        </span>
+                      </div>
+                      <div className="obl-card-row">
+                        <span className="obl-card-lbl">INTEREST PAID</span>
+                        <span className="obl-card-val" style={{ color: 'var(--ba-gold)' }}>
+                          <ScrambleText text={fmt(bal.interestPaid || 0)} speed={60} step={0.2} />
                         </span>
                       </div>
                       <div className="obl-card-row">
@@ -1173,7 +1325,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         onClick={() => handleDeleteLoan(loan)}
                         disabled={saving || !dbMetadata}
                       >
-                        CLOSE LOAN
+                        DISCHARGE INDENTURE
                       </button>
                     </div>
 
@@ -1184,7 +1336,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         </div>
                         <div className="obl-form-grid" style={{ marginBottom: '10px' }}>
                           <Input
-                            label="AMOUNT (₹)"
+                            label="AMOUNT"
                             type="number"
                             value={loanLogForm.amount}
                             onChange={v => setLoanLogForm(f => ({ ...f, amount: v }))}
@@ -1279,7 +1431,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                                   ))}
                                 </tr>
                               </thead>
-                              <tbody>
+                              <tbody className="obl-proj-tbody">
                                 {proj.schedule.slice(0, 24).map((row, i) => (
                                   <tr key={i} style={{ borderBottom: '1px solid var(--ba-border-lo)' }}>
                                     <td style={{ padding: '3px 6px', color: 'var(--ba-gold-mute)' }}>{row.month}</td>
@@ -1309,7 +1461,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                 <span>EMI PURCHASES</span>
                 <button
                   className="obl-action-btn primary"
-                  onClick={() => setShowEmiForm(f => !f)}
+                  onClick={() => showEmiForm ? resetEmiForm() : setShowEmiForm(true)}
                 >
                   {showEmiForm ? 'CANCEL' : '+ DECLARE EMI'}
                 </button>
@@ -1317,17 +1469,19 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
 
               {showEmiForm && (
                 <div className="obl-form-wrap obl-reveal" style={{ marginBottom: '14px' }}>
-                  <div className="obl-section-hdr" style={{ marginBottom: '14px' }}>DECLARE EMI PURCHASE</div>
+                  <div className="obl-section-hdr" style={{ marginBottom: '14px' }}>
+                    {editingEmiId ? 'EDIT EMI PURCHASE' : 'DECLARE EMI PURCHASE'}
+                  </div>
                   <div className="obl-form-grid">
                     <Input label="ITEM NAME" value={emiForm.name}
                       onChange={v => setEmiForm(f => ({ ...f, name: v }))} placeholder="iPhone 15 Pro" />
-                    <Input label="TOTAL AMOUNT (₹)" type="number" value={emiForm.total_amount}
+                    <Input label="TOTAL AMOUNT" type="number" value={emiForm.total_amount}
                       onChange={v => setEmiForm(f => ({ ...f, total_amount: v }))} placeholder="90000" />
-                    <Input label="DOWN PAYMENT (₹)" type="number" value={emiForm.down_payment}
+                    <Input label="DOWN PAYMENT" type="number" value={emiForm.down_payment}
                       onChange={v => setEmiForm(f => ({ ...f, down_payment: v }))} placeholder="0" />
                   </div>
                   <div className="obl-form-grid">
-                    <Input label="EMI AMOUNT (₹)" type="number" value={emiForm.emi_amount}
+                    <Input label="EMI AMOUNT" type="number" value={emiForm.emi_amount}
                       onChange={v => setEmiForm(f => ({ ...f, emi_amount: v }))} placeholder="7500" />
                     <Input label="TENURE (MONTHS)" type="number" value={emiForm.tenure_months}
                       onChange={v => setEmiForm(f => ({ ...f, tenure_months: v }))} placeholder="12" />
@@ -1344,8 +1498,10 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                     <Input label="FIRST EMI DATE" type="date" value={emiForm.first_emi_date}
                       onChange={v => setEmiForm(f => ({ ...f, first_emi_date: v }))} />
                   </div>
-                  <button className="mech-btn" onClick={handleAddEMI} disabled={saving || !emiForm.name || !emiForm.emi_amount}>
-                    {saving ? 'DECLARING...' : 'AUTHORIZE & DECLARE EMI'}
+                  <button className="mech-btn" onClick={handleSaveEMI} disabled={saving || !emiForm.name || !emiForm.emi_amount}>
+                    {saving
+                      ? (editingEmiId ? 'UPDATING...' : 'DECLARING...')
+                      : (editingEmiId ? 'AUTHORIZE & UPDATE EMI' : 'AUTHORIZE & DECLARE EMI')}
                   </button>
                 </div>
               )}
@@ -1364,7 +1520,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                   <div key={emi._id} className={`obl-card${lastTouchedId === emi._id ? ' obl-highlight' : ''}`}>
                     <div className="obl-card-header">
                       <span className="obl-card-title">{emi.name}</span>
-                      <span className="obl-card-badge active">ACTIVE</span>
+                      <span className="obl-card-badge active">BINDING</span>
                     </div>
                     <div className="obl-card-body">
                       <div className="obl-card-row">
@@ -1379,6 +1535,18 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         <span className="obl-card-lbl">OUTSTANDING</span>
                         <span className="obl-card-val crit">
                           <ScrambleText text={fmt(bal.outstanding || emi.financed_amount)} speed={60} step={0.2} />
+                        </span>
+                      </div>
+                      <div className="obl-card-row">
+                        <span className="obl-card-lbl">PRINCIPAL PAID</span>
+                        <span className="obl-card-val ok">
+                          <ScrambleText text={fmt(bal.principalPaid || 0)} speed={60} step={0.2} />
+                        </span>
+                      </div>
+                      <div className="obl-card-row">
+                        <span className="obl-card-lbl">INTEREST PAID</span>
+                        <span className="obl-card-val" style={{ color: 'var(--ba-gold)' }}>
+                          <ScrambleText text={fmt(bal.interestPaid || 0)} speed={60} step={0.2} />
                         </span>
                       </div>
                       <div className="obl-card-row">
@@ -1404,10 +1572,64 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                       </div>
                     </div>
                     <div className="obl-card-actions">
-                      <button className="obl-action-btn" onClick={() => ObligationsEngine.deleteEMI(emi._id, dbMetadata, userId)}>
-                        MARK CLOSED
+                      <button className="obl-action-btn" onClick={() => handleEditEMI(emi)}>
+                        EDIT STATE
+                      </button>
+                      <button
+                        className="obl-action-btn"
+                        onClick={() => openEmiPay(emi)}
+                        disabled={!dbTransactions || !dbMetadata}
+                      >
+                        LOG PAYMENT
+                      </button>
+                      <button
+                        className="obl-action-btn"
+                        onClick={() => handleDischargeEMI(emi)}
+                        disabled={saving || !dbMetadata}
+                      >
+                        DISCHARGE INDENTURE
                       </button>
                     </div>
+
+                    {emiPayTarget === emi._id && (
+                      <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
+                        <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                          LOG EMI PAYMENT
+                        </div>
+                        <div className="obl-form-grid wide" style={{ marginBottom: '10px' }}>
+                          <Input
+                            label="AMOUNT"
+                            type="number"
+                            value={emiPayForm.amount}
+                            onChange={v => setEmiPayForm(f => ({ ...f, amount: v }))}
+                            placeholder={String(emi.emi_amount || 0)}
+                          />
+                          <Input
+                            label="DATE"
+                            type="date"
+                            value={emiPayForm.date}
+                            onChange={v => setEmiPayForm(f => ({ ...f, date: v }))}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="mech-btn"
+                            onClick={() => handleEmiPaySubmit(emi)}
+                            disabled={saving || !emiPayForm.amount || !emiPayForm.date}
+                            style={{ marginTop: 0, flex: 1 }}
+                          >
+                            {saving ? 'LOGGING...' : 'AUTHORIZE LOG'}
+                          </button>
+                          <button
+                            className="obl-action-btn"
+                            onClick={() => setEmiPayTarget(null)}
+                            style={{ flex: '0 0 120px' }}
+                          >
+                            CANCEL
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

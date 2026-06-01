@@ -1,6 +1,100 @@
 // src/components/slides/mobile/MobileAuspex.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import ScrambleText from '../../shared/ScrambleText';
+import { FinanceEngine } from '../../../utils/engine';
+
+const formatMonthLabel = (monthPrefix) => {
+  if (!monthPrefix) return '';
+  const [y, m] = monthPrefix.split('-');
+  const d = new Date(Number(y), Number(m) - 1, 1);
+  return d.toLocaleString('en-GB', { month: 'short', year: 'numeric' }).toUpperCase();
+};
+const fmtINR = (n) => `${Math.round(n || 0).toLocaleString('en-IN')}`;
+
+const MOB_RITE_STEPS = [
+  { code: '01010110', label: 'VOX-LINK STABILISING',      duration: 700 },
+  { code: '01000011', label: 'COG-DAEMON AWAKENED',       duration: 750 },
+  { code: '01010000', label: 'PURITY SEALS BROKEN',       duration: 650 },
+  { code: '01000001', label: 'PATHWAYS BOUND',            duration: 750 },
+  { code: '01000100', label: 'ARCHIVE UNSEALED',          duration: 800 },
+];
+
+const mobRandomBinary = () => {
+  let s = '';
+  for (let i = 0; i < 4; i++) {
+    let nib = '';
+    for (let j = 0; j < 4; j++) nib += Math.random() < 0.5 ? '0' : '1';
+    s += (i ? ' ' : '') + nib;
+  }
+  return s;
+};
+
+const MobileArchiveRitual = ({ ritualKey }) => {
+  const [stage, setStage] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [binharic, setBinharic] = useState(() => mobRandomBinary());
+
+  useEffect(() => {
+    setStage(0); setProgress(0);
+    let cancelled = false;
+    let raf;
+    const runStage = (i) => {
+      if (cancelled || i >= MOB_RITE_STEPS.length) return;
+      const duration = MOB_RITE_STEPS[i].duration;
+      const start = performance.now();
+      const tick = () => {
+        if (cancelled) return;
+        const elapsed = performance.now() - start;
+        const pct = Math.min(100, (elapsed / duration) * 100);
+        setProgress(pct);
+        if (pct >= 100) {
+          setStage(i + 1); setProgress(0);
+          setTimeout(() => runStage(i + 1), 110);
+        } else {
+          raf = requestAnimationFrame(tick);
+        }
+      };
+      raf = requestAnimationFrame(tick);
+    };
+    runStage(0);
+    return () => { cancelled = true; cancelAnimationFrame(raf); };
+  }, [ritualKey]);
+
+  useEffect(() => {
+    const iv = setInterval(() => setBinharic(mobRandomBinary()), 140);
+    return () => clearInterval(iv);
+  }, []);
+
+  return (
+    <div className="mob-arch-ritual">
+      <div className="mob-arch-head">
+        <span className="mob-arch-head-ttl">RITE OF RECOLLECTION</span>
+      </div>
+      <div className="mob-arch-tbl">
+        {MOB_RITE_STEPS.map((s, i) => {
+          const done   = i < stage;
+          const active = i === stage;
+          const pct    = active ? progress : done ? 100 : 0;
+          return (
+            <div
+              key={`${ritualKey}-${i}`}
+              className={`mob-arch-row ${done ? 'done' : active ? 'active' : 'pending'}`}
+              style={{ animationDelay: `${i * 90}ms` }}
+            >
+              <span className="mob-arch-code">{s.code}</span>
+              <span>{s.label}{active ? '...' : ''}</span>
+              <div className="mob-arch-bar"><span style={{ width: `${pct}%` }} /></div>
+              <span className="mob-arch-mark">{done ? '✓' : active ? '◈' : '·'}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mob-arch-binharic">
+        <span>«</span> {binharic} <span>»</span>
+      </div>
+    </div>
+  );
+};
 
 const legacyManifestId = 'current_holdings';
 const manifestIdForUser = (userId) => `finance:investments:current:${userId || 'default'}`;
@@ -119,7 +213,7 @@ const ManifestOverrideModal = ({ isOpen, onClose, holding, onSave }) => {
         </div>
         
         <div>
-          <div style={{ fontSize: '10px', color: 'var(--text-d)', marginBottom: '4px' }}>AVERAGE COST BASIS (₹)</div>
+          <div style={{ fontSize: '10px', color: 'var(--text-d)', marginBottom: '4px' }}>AVERAGE COST BASIS</div>
           <input className="mech-input" type="number" step="any" value={avgPrice} onChange={e => setAvgPrice(e.target.value)} style={{ marginTop: 0, padding: '12px' }} />
         </div>
 
@@ -135,7 +229,7 @@ const ManifestOverrideModal = ({ isOpen, onClose, holding, onSave }) => {
 // ─────────────────────────────────────────────
 // InteractiveMechChart — Touch-Aware Line Chart
 // ─────────────────────────────────────────────
-const InteractiveMechChart = ({ months, series, isDual, yPrefix = '', showAverage = true }) => {
+const InteractiveMechChart = ({ months, series, isDual, yPrefix = '', showAverage = true, onPointClick = null }) => {
   const [hoverIdx, setHoverIdx] = useState(null);
   const svgRef = useRef(null);
 
@@ -243,10 +337,11 @@ const InteractiveMechChart = ({ months, series, isDual, yPrefix = '', showAverag
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" 
-        style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible', touchAction: 'none' }}
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible', touchAction: 'none', cursor: onPointClick ? 'pointer' : 'default' }}
         onMouseMove={handlePointerMove} onMouseLeave={() => setHoverIdx(null)}
         onTouchStart={handlePointerMove} onTouchMove={handlePointerMove} onTouchEnd={() => setHoverIdx(null)}
+        onClick={() => { if (onPointClick && hoverIdx !== null) onPointClick(months[hoverIdx]); }}
       >
         <defs>
           <pattern id="chart-grid" width="12" height="12" patternUnits="userSpaceOnUse">
@@ -379,20 +474,180 @@ const MOBILE_AUSPEX_STYLES = `
     100% { opacity: 1; transform: translateY(0); }
   }
   .assimilate-in { animation: dataAssimilate 0.4s ease-out forwards; }
+
+  /* ── Pre-Genesis warning ── */
+  .mob-arch-warn {
+    display: flex;
+    background: linear-gradient(90deg,
+      rgba(204,34,0,0.22) 0%,
+      rgba(234,179,8,0.12) 30%,
+      rgba(234,179,8,0.12) 70%,
+      rgba(204,34,0,0.22) 100%);
+    border-top: 1px solid var(--ba-crimson);
+    border-bottom: 2px solid var(--ba-crimson);
+    font-family: var(--mono);
+    animation: mobArchWarnPulse 1.6s ease-in-out infinite;
+    position: relative;
+    overflow: hidden;
+  }
+  .mob-arch-warn::before {
+    content: '';
+    position: absolute; top: 0; bottom: 0;
+    width: 200%;
+    background: repeating-linear-gradient(45deg,
+      transparent 0 6px,
+      rgba(204,34,0,0.14) 6px 10px);
+    animation: mobArchWarnSlide 5s linear infinite;
+    z-index: 0;
+  }
+  .mob-arch-warn-side {
+    flex-shrink: 0; width: 44px;
+    background: rgba(204,34,0,0.5);
+    color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 18px;
+    text-shadow: 0 0 12px #cc2200, 0 0 4px #fff;
+    border-right: 1px solid var(--ba-crimson);
+    z-index: 1;
+  }
+  .mob-arch-warn-side small { font-size: 6px; letter-spacing: 2px; margin-top: 1px; }
+  .mob-arch-warn-body {
+    flex: 1; padding: 7px 10px;
+    display: flex; flex-direction: column; gap: 2px;
+    z-index: 1;
+  }
+  .mob-arch-warn-ttl {
+    font-size: 10px; letter-spacing: 2px; font-weight: bold;
+    color: var(--ba-crimson);
+    text-shadow: 0 0 8px rgba(204,34,0,0.7);
+  }
+  .mob-arch-warn-sub {
+    font-size: 9px; letter-spacing: 1px; line-height: 1.45;
+    color: #fbe9b0;
+    text-shadow: 0 0 6px rgba(234,179,8,0.4);
+  }
+  @keyframes mobArchWarnPulse {
+    0%, 100% { box-shadow: inset 0 0 18px rgba(204,34,0,0.25); }
+    50%      { box-shadow: inset 0 0 26px rgba(204,34,0,0.55); }
+  }
+  @keyframes mobArchWarnSlide {
+    0% { transform: translateX(-50%); } 100% { transform: translateX(0); }
+  }
+
+  /* ── Ritual loader — Mechanicus binharic rite log ── */
+  .mob-arch-ritual {
+    padding: 22px 12px 26px;
+    display: flex; flex-direction: column;
+    gap: 14px; font-family: var(--mono);
+    position: relative; overflow: hidden;
+    background: linear-gradient(180deg, transparent 0%, rgba(204,34,0,0.04) 50%, transparent 100%);
+    background-size: 100% 5px;
+    animation: mobArchScan 3.5s linear infinite;
+  }
+  @keyframes mobArchScan { 0% { background-position: 0 0; } 100% { background-position: 0 100%; } }
+  .mob-arch-ritual::before {
+    content: '';
+    position: absolute; left: 0; right: 0; top: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--ba-crimson), transparent);
+    box-shadow: 0 0 8px rgba(204,34,0,0.6);
+    animation: mobArchSweep 2.8s cubic-bezier(0.4,0,0.2,1) infinite;
+  }
+  @keyframes mobArchSweep {
+    0%   { transform: translateY(0);     opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { transform: translateY(320px); opacity: 0; }
+  }
+
+  .mob-arch-head { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .mob-arch-head-glyph {
+    font-size: 18px; color: var(--ba-crimson); letter-spacing: 4px;
+    text-shadow: 0 0 12px rgba(204,34,0,0.8), 0 0 4px #fff;
+    animation: mobArchGlyph 0.6s steps(4, end) infinite;
+  }
+  @keyframes mobArchGlyph {
+    0%   { transform: translate(0,0) rotate(0deg); opacity: 0.55; }
+    25%  { transform: translate(-1px,1px) rotate(-3deg); opacity: 1; filter: brightness(1.4); }
+    50%  { transform: translate(0,0) rotate(0deg); opacity: 0.85; }
+    75%  { transform: translate(1px,-1px) rotate(3deg); opacity: 1; filter: brightness(1.4); }
+    100% { transform: translate(0,0) rotate(0deg); opacity: 0.55; }
+  }
+  .mob-arch-head-ttl {
+    font-size: 10px; letter-spacing: 3px; color: var(--ba-gold); font-weight: bold;
+    text-shadow: 0 0 6px rgba(201,168,76,0.5);
+  }
+
+  .mob-arch-tbl {
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--ba-border-lo);
+    border-bottom: 1px solid var(--ba-border-lo);
+    background: rgba(0,0,0,0.35);
+    font-size: 9px; letter-spacing: 1px;
+  }
+  .mob-arch-row {
+    display: grid;
+    grid-template-columns: 62px 1fr 60px 14px;
+    gap: 8px; align-items: center;
+    opacity: 0; transform: translateX(-8px);
+    animation: mobArchRowIn 220ms cubic-bezier(0.16,1,0.3,1) forwards;
+  }
+  @keyframes mobArchRowIn { to { opacity: 1; transform: translateX(0); } }
+  .mob-arch-row.pending { opacity: 0.28; }
+  .mob-arch-row.done    { color: var(--border-hi); text-shadow: 0 0 5px rgba(74,222,128,0.35); }
+  .mob-arch-row.active  { color: var(--ba-crimson); text-shadow: 0 0 6px rgba(204,34,0,0.55); }
+  .mob-arch-code { font-size: 8px; color: var(--ba-gold-dim); }
+  .mob-arch-row.done .mob-arch-code,
+  .mob-arch-row.active .mob-arch-code { color: inherit; opacity: 0.7; }
+  .mob-arch-bar {
+    height: 6px; background: rgba(0,0,0,0.6);
+    border: 1px solid var(--ba-border-lo); overflow: hidden;
+  }
+  .mob-arch-bar > span {
+    display: block; height: 100%;
+    background: repeating-linear-gradient(90deg, var(--ba-crimson) 0 5px, rgba(204,34,0,0.4) 5px 7px);
+    box-shadow: 0 0 4px rgba(204,34,0,0.5);
+    transition: width 60ms linear;
+  }
+  .mob-arch-row.done .mob-arch-bar > span {
+    background: repeating-linear-gradient(90deg, var(--border-hi) 0 5px, rgba(74,222,128,0.4) 5px 7px);
+    box-shadow: 0 0 4px rgba(74,222,128,0.4);
+  }
+  .mob-arch-mark { font-size: 11px; text-align: center; line-height: 1; }
+  .mob-arch-row.done .mob-arch-mark   { color: var(--border-hi); animation: mobArchStamp 360ms cubic-bezier(0.16,1,0.3,1) both; }
+  .mob-arch-row.active .mob-arch-mark { color: var(--ba-crimson); animation: mobArchMarkPulse 0.45s steps(2, end) infinite; }
+  @keyframes mobArchStamp {
+    0% { transform: scale(2.2); opacity: 0; filter: brightness(2.5); }
+    60% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes mobArchMarkPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  .mob-arch-binharic {
+    font-size: 9px; letter-spacing: 2px; text-align: center;
+    color: var(--ba-gold-dim); opacity: 0.6;
+  }
+  .mob-arch-binharic span { color: var(--ba-crimson); text-shadow: 0 0 5px rgba(204,34,0,0.4); }
 `;
 
 // ─────────────────────────────────────────────
 // MobileAuspexSlide 
 // ─────────────────────────────────────────────
-export default function MobileAuspex({ data, dbInvestments, userId }) {
+export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMetadata, userId }) {
   const [mode, setMode]                 = useState('trends');
   const [holdings, setHoldings]         = useState([]);
   const [history, setHistory]           = useState([]);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
   const [selectedCategory, setSelectedCategory] = useState('ALL');
-  
+
   const [isModalOpen, setIsModalOpen]   = useState(false);
   const [editingHolding, setEditingHolding] = useState(null);
+
+  // Archive (past-month dossier)
+  const todayMonth = new Date().toISOString().substring(0, 7);
+  const [archiveMonth, setArchiveMonth] = useState(todayMonth);
+  const [archiveData, setArchiveData]   = useState(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   const expenseTrends = data?.trends ?? [];
   const expenseCategories = data?.expenseCategories ?? [];
@@ -441,6 +696,21 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
     changes?.on('error', err => console.error('AUSPEX:CHANGES', err));
     return () => changes?.cancel();
   }, [dbInvestments, data, userId, selectedYear]);
+
+  // ── Archive: reconstruct a past month's ledger on demand ─────
+  // Hold the ritual loader for a minimum duration so the lore plays.
+  useEffect(() => {
+    if (mode !== 'archive' || !dbTransactions || !dbMetadata || !userId || !archiveMonth) return;
+    let cancelled = false;
+    setArchiveLoading(true);
+    const minHold = new Promise(r => setTimeout(r, 4100));
+    const fetch   = FinanceEngine.reconstructBalances(dbTransactions, dbMetadata, archiveMonth, userId);
+    Promise.all([fetch, minHold])
+      .then(([result]) => { if (!cancelled) setArchiveData(result); })
+      .catch(err => { console.error('AUSPEX:ARCHIVE', err); if (!cancelled) setArchiveData(null); })
+      .finally(() => { if (!cancelled) setArchiveLoading(false); });
+    return () => { cancelled = true; };
+  }, [mode, archiveMonth, dbTransactions, dbMetadata, userId]);
 
   // MIRRORED EXACTLY FROM DESKTOP
   useEffect(() => {
@@ -578,28 +848,173 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
         <button className={`mob-tab ${mode === 'manifest' ? 'active' : ''}`} onClick={() => setMode('manifest')}>
           [ MANIFEST ]
         </button>
+        <button className={`mob-tab ${mode === 'archive' ? 'active' : ''}`} onClick={() => setMode('archive')}>
+          [ ARCHIVE ]
+        </button>
       </div>
 
       <div className="mob-auspex-grid">
-        {/* ── SUMMARY KPIs ── */}
-        <div className="panel mech-panel" style={{ padding: '15px' }}>
-          <div className="mob-kpi-row">
-            <div>
-              <div className="kpi-lbl" style={{ fontSize: '9px' }}>CAPITAL DEPLOYED</div>
-              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div className="kpi-lbl" style={{ fontSize: '9px' }}>MARKET VALUE</div>
-              <div className="kpi-val" style={{ fontSize: '18px' }}>₹<ScrambleText text={totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
-            </div>
-            <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #2a0800', paddingTop: '8px', marginTop: '4px', textAlign: 'center' }}>
-              <div className="kpi-lbl" style={{ fontSize: '9px' }}>NET YIELD</div>
-              <div className={`kpi-val ${totalPL >= 0 ? 'ok' : 'warn'}`} style={{ fontSize: '18px' }}>
-                <ScrambleText text={`${totalPL >= 0 ? '+' : ''}₹${Math.abs(totalPL).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${totalPLPct}%)`} />
+        {/* ── SUMMARY KPIs (portfolio — hidden in archive) ── */}
+        {mode !== 'archive' && (
+          <div className="panel mech-panel" style={{ padding: '15px' }}>
+            <div className="mob-kpi-row">
+              <div>
+                <div className="kpi-lbl" style={{ fontSize: '9px' }}>CAPITAL DEPLOYED</div>
+                <div className="kpi-val" style={{ fontSize: '18px' }}><ScrambleText text={totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="kpi-lbl" style={{ fontSize: '9px' }}>MARKET VALUE</div>
+                <div className="kpi-val" style={{ fontSize: '18px' }}><ScrambleText text={totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} /></div>
+              </div>
+              <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #2a0800', paddingTop: '8px', marginTop: '4px', textAlign: 'center' }}>
+                <div className="kpi-lbl" style={{ fontSize: '9px' }}>NET YIELD</div>
+                <div className={`kpi-val ${totalPL >= 0 ? 'ok' : 'warn'}`} style={{ fontSize: '18px' }}>
+                  <ScrambleText text={`${totalPL >= 0 ? '+' : ''}${Math.abs(totalPL).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${totalPLPct}%)`} />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* ── ARCHIVE MODE ── */}
+        {mode === 'archive' && (() => {
+          const monthOptions = (() => {
+            const set = new Set((expenseTrends || []).map(t => t.month).filter(Boolean));
+            const [y, m] = todayMonth.split('-').map(Number);
+            for (let i = 0; i < 12; i++) {
+              const d = new Date(y, m - 1 - i, 1);
+              set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+            }
+            return [...set].sort().reverse();
+          })();
+          const metrics = archiveData?.metrics || {};
+          const txns    = archiveData?.transactions || [];
+          const sorted  = [...txns].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          const isLive  = archiveMonth === todayMonth;
+          const genesisMonth = data?.genesisMonth;
+          const isPreGenesis = genesisMonth && archiveMonth < genesisMonth;
+          const incomeSet  = new Set(data?.positiveCategories || []);
+          const neutralSet = new Set(data?.neutralCategories  || []);
+          const txnKind = (tx) => {
+            const cat = tx.category;
+            if (incomeSet.has(cat))  return 'income';
+            if (neutralSet.has(cat)) return 'transfer';
+            return 'expense';
+          };
+          const KIND_COLOR = {
+            income:   'var(--border-hi)',
+            expense:  'var(--ba-crimson)',
+            transfer: 'var(--ba-gold)',
+          };
+
+          return (
+            <div className="panel mech-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <select
+                  className="mech-select"
+                  value={archiveMonth}
+                  onChange={e => setArchiveMonth(e.target.value)}
+                  style={{ flex: 1, marginTop: 0, fontSize: '11px', padding: '6px' }}
+                >
+                  {monthOptions.map(opt => (
+                    <option key={opt} value={opt}>{formatMonthLabel(opt)}</option>
+                  ))}
+                </select>
+                {isLive && (
+                  <span style={{ fontSize: '8px', padding: '3px 6px', border: '1px solid var(--border-hi)', color: 'var(--border-hi)', letterSpacing: '2px' }}>LIVE</span>
+                )}
+              </div>
+
+              {isPreGenesis && (
+                <div className="mob-arch-warn">
+                  <div className="mob-arch-warn-side">
+                    ⚠
+                    <small>HERETEK</small>
+                  </div>
+                  <div className="mob-arch-warn-body">
+                    <div className="mob-arch-warn-ttl">◈ PRE-GENESIS DATA</div>
+                    <div className="mob-arch-warn-sub">
+                      Records before <strong style={{ color: '#fff' }}>{formatMonthLabel(genesisMonth)}</strong>{' '}
+                      translated from legacy cogitator. Treat as approximation.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>
+                  <div className="kpi-lbl" style={{ fontSize: '8px' }}>GROSS TITHE</div>
+                  <div className="kpi-val ok" style={{ fontSize: '14px' }}>
+                    <ScrambleText text={fmtINR(metrics.grossIncome)} speed={50} step={0.3} />
+                  </div>
+                </div>
+                <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>
+                  <div className="kpi-lbl" style={{ fontSize: '8px' }}>GROSS EXPEND</div>
+                  <div className="kpi-val warn" style={{ fontSize: '14px' }}>
+                    <ScrambleText text={fmtINR(metrics.grossExpense)} speed={50} step={0.3} />
+                  </div>
+                </div>
+                <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>
+                  <div className="kpi-lbl" style={{ fontSize: '8px' }}>NET INCOME</div>
+                  <div className="kpi-val ok" style={{ fontSize: '14px' }}>
+                    <ScrambleText text={fmtINR(metrics.netIncome)} speed={50} step={0.3} />
+                  </div>
+                </div>
+                <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>
+                  <div className="kpi-lbl" style={{ fontSize: '8px' }}>NET EXPEND</div>
+                  <div className="kpi-val warn" style={{ fontSize: '14px' }}>
+                    <ScrambleText text={fmtINR(metrics.netExpense)} speed={50} step={0.3} />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '1px', borderBottom: '1px solid var(--ba-border-lo)', paddingBottom: '4px' }}>
+                {archiveLoading ? 'COMPILING...' : `${sorted.length} RECORDS · ${formatMonthLabel(archiveMonth)}`}
+              </div>
+
+              {archiveLoading ? (
+                <MobileArchiveRitual ritualKey={archiveMonth} />
+              ) : sorted.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ba-gold-mute)', fontSize: '11px', letterSpacing: '2px' }}>
+                  NO RECORDS FOR {formatMonthLabel(archiveMonth)}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {sorted.map(tx => {
+                    const amt    = Math.abs(Number(tx.amount) || 0);
+                    const kind   = txnKind(tx);
+                    const prefix = kind === 'income' ? '+' : kind === 'expense' ? '−' : '';
+                    return (
+                      <div key={tx._id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: '8px',
+                        padding: '7px 4px', borderBottom: '1px solid var(--ba-border-lo)',
+                        fontFamily: 'var(--mono)', fontSize: '11px'
+                      }}>
+                        <div style={{ flexShrink: 0, color: 'var(--ba-gold-mute)', fontSize: '9px', width: '52px' }}>
+                          {tx.date?.substring(5) || '—'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {tx.description || tx.category || '—'}
+                          </div>
+                          <div style={{ color: 'var(--ba-gold-mute)', fontSize: '9px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                            {tx.category || '—'} · {tx.sub_account || tx.account_type || '—'}
+                          </div>
+                        </div>
+                        <div style={{
+                          flexShrink: 0, fontWeight: 'bold', textAlign: 'right', whiteSpace: 'nowrap',
+                          color: KIND_COLOR[kind]
+                        }}>
+                          {prefix}{fmtINR(amt)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── MANIFEST MODE ── */}
         {mode === 'manifest' && (
@@ -643,10 +1058,10 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
                           </button>
                         </td>
                         <td style={{ padding: '8px 4px', color: 'var(--text-d)', fontSize: '11px' }}>{shares.toLocaleString('en-IN')}</td>
-                        <td style={{ padding: '8px 4px', color: 'var(--text-d)', fontSize: '11px' }}>₹{avgPrice.toLocaleString('en-IN')}</td>
-                        <td style={{ padding: '8px 4px', textAlign: 'right', color: 'var(--text-d)', fontSize: '11px' }}>₹{value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ padding: '8px 4px', color: 'var(--text-d)', fontSize: '11px' }}>{avgPrice.toLocaleString('en-IN')}</td>
+                        <td style={{ padding: '8px 4px', textAlign: 'right', color: 'var(--text-d)', fontSize: '11px' }}>{value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ padding: '8px 4px', textAlign: 'right', fontSize: '11px' }} className={pl >= 0 ? 'ok' : 'warn'}>
-                          {pl >= 0 ? '+' : ''}₹{pl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          {pl >= 0 ? '+' : ''}{pl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </td>
                       </tr>
                     );
@@ -679,7 +1094,7 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
               <div style={{ flex: 1, minHeight: 0 }}>
                 {filteredHistory.length > 0 ? (
                   <InteractiveMechChart
-                    key={`inv-${selectedYear}`} months={investMonths} isDual={true} yPrefix="₹" showAverage={false}
+                    key={`inv-${selectedYear}`} months={investMonths} isDual={true} yPrefix="" showAverage={false}
                     series={[
                       { values: investedValues, color: '#d97706', label: 'INVESTED' },
                       { values: currentValues, color: '#22c55e', label: 'VALUE' },
@@ -710,9 +1125,10 @@ export default function MobileAuspex({ data, dbInvestments, userId }) {
                 {filteredExpenses.length > 0 ? (
                   <InteractiveMechChart
                     key={`exp-${selectedYear}-${selectedCategory}`} months={expenseMonths} isDual={false} showAverage={true}
-                    series={[{ 
-                      values: expenseValues, color: '#22c55e', label: selectedCategory === 'ALL' ? 'EXPENSES' : selectedCategory.toUpperCase() 
+                    series={[{
+                      values: expenseValues, color: '#22c55e', label: selectedCategory === 'ALL' ? 'EXPENSES' : selectedCategory.toUpperCase()
                     }]}
+                    onPointClick={(m) => { setArchiveMonth(m); setMode('archive'); }}
                   />
                 ) : (
                   <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: '10px' }}>

@@ -1,5 +1,28 @@
 apply plugin: 'com.android.application'
 
+// ── Release signing ────────────────────────────────────────────────
+// Credentials come from one of (in order):
+//   1. ./keystore.properties (file next to this build.gradle, gitignored)
+//   2. environment variables  CODEX_KEYSTORE_FILE / _PASSWORD / _ALIAS /
+//      _ALIAS_PASSWORD  (good for CI / shell-based release scripts)
+//
+// If neither is present the `release` build type falls back to the
+// debug keystore so `./gradlew assembleDebug` still works — but a
+// release-signed APK requires real credentials.
+def keystorePropsFile = rootProject.file('app/keystore.properties')
+def keystoreProps     = new Properties()
+def hasReleaseSigning = false
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+    hasReleaseSigning = true
+} else if (System.getenv('CODEX_KEYSTORE_FILE')) {
+    keystoreProps['storeFile']     = System.getenv('CODEX_KEYSTORE_FILE')
+    keystoreProps['storePassword'] = System.getenv('CODEX_KEYSTORE_PASSWORD')
+    keystoreProps['keyAlias']      = System.getenv('CODEX_KEYSTORE_ALIAS')
+    keystoreProps['keyPassword']   = System.getenv('CODEX_KEYSTORE_ALIAS_PASSWORD') ?: keystoreProps['storePassword']
+    hasReleaseSigning = true
+}
+
 android {
     namespace = "com.Sanguinius"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +39,36 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile     file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias      keystoreProps['keyAlias']
+                keyPassword   keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
-            minifyEnabled false
+            // R8 (minification + obfuscation + dead-code removal)
+            minifyEnabled true
+            shrinkResources true
+            // Strip debug logs and assert calls from the release bundle.
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            debuggable false
+            // Use real keystore when provided; otherwise build only assembles
+            // and the AAB/APK is unsigned (Play Store / sideload will reject).
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            // Keep debug builds installable on adb without the release key.
+            minifyEnabled false
+            debuggable true
         }
     }
 }

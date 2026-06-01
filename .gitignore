@@ -23,3 +23,17 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Android release-signing secrets — never check these in.
+android/app/keystore.properties
+android/app/*.keystore
+android/app/*.jks
+android/keystore.properties
+*.keystore
+*.jks
+
+# Local tailscale serve backups — snapshot at migration time, not
+# meaningful outside that one machine. Live state lives in
+# `tailscale serve status`.
+tailscale-serve*.backup.json
+tailscale-serve*.json

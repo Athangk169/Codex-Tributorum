@@ -1,6 +1,7 @@
 // src/App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AudioCore } from './utils/audioCore';
+import { directionBetween } from './utils/slideOrder';
 
 // Core Layout
 import CrtShell from './components/CrtShell';
@@ -8,6 +9,11 @@ import BootScreen from './components/layout/BootScreen';
 import ImperialHeader from './components/layout/ImperialHeader';
 import TacticalNav from './components/layout/TacticalNav';
 import SystemFooter from './components/layout/SystemFooter';
+import SlideTransition from './components/shared/SlideTransition';
+import SlideErrorBoundary from './components/shared/SlideErrorBoundary';
+import SwUpdateBanner from './components/layout/SwUpdateBanner';
+import TimeOfDayTint from './components/layout/TimeOfDayTint';
+import IdleLitanyOverlay from './components/layout/IdleLitanyOverlay';
 
 // Mobile
 import useIsMobile from './hooks/useIsMobile';
@@ -41,6 +47,17 @@ function App() {
   const [activeSlide,  setActiveSlide]  = useState('overview');
   const [credentials,  setCredentials]  = useState(null);
 
+  // Direction-aware slide transition. Compare prev vs current
+  // against the canonical slide order; SlideTransition uses it to
+  // pick forward (slide in from right) vs backward animation.
+  const prevSlideRef = useRef('overview');
+  const [slideDirection, setSlideDirection] = useState('forward');
+  useEffect(() => {
+    if (prevSlideRef.current === activeSlide) return;
+    setSlideDirection(directionBetween(prevSlideRef.current, activeSlide));
+    prevSlideRef.current = activeSlide;
+  }, [activeSlide]);
+
   const { financeData, isLoading, syncLed, dbs } = useFinanceData(credentials);
 
   useEffect(() => {
@@ -49,7 +66,11 @@ function App() {
   }, [isBooting]);
 
   const handleBootComplete = (creds) => {
-    setCredentials(creds);
+    // Drop the password on the floor — auth is now carried by the
+    // HttpOnly AuthSession cookie that BootScreen's /_session POST
+    // already set on the browser. Storing only the username keeps the
+    // password out of React state for the lifetime of the session.
+    setCredentials({ username: creds.username });
     setIsBooting(false);
   };
 
@@ -59,35 +80,53 @@ function App() {
   };
 
   if (isBooting) {
-    return isMobile
-      ? <MobileBootScreen onComplete={handleBootComplete} />
-      : <BootScreen       onComplete={handleBootComplete} />;
+    return (
+      <>
+        <SwUpdateBanner />
+<TimeOfDayTint />
+<IdleLitanyOverlay />
+        {isMobile
+          ? <MobileBootScreen onComplete={handleBootComplete} />
+          : <BootScreen       onComplete={handleBootComplete} />}
+      </>
+    );
   }
 
   // ── Mobile ──
   if (isMobile) {
     return (
+      <>
+      <SwUpdateBanner />
+<TimeOfDayTint />
+<IdleLitanyOverlay />
       <MobileShell>
         <MobileHeader
           financeData={financeData}
           user={credentials?.username}
           syncLed={syncLed}
         />
-        <MobileContent>
-          {activeSlide === 'overview'  && <MobileOverview  data={financeData} syncLed={syncLed} />}
-          {activeSlide === 'ledger'    && <MobileLedger    data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
-          {activeSlide === 'auspex'    && <MobileAuspex    data={financeData} dbInvestments={dbs?.inv}   userId={credentials?.username} />}
-          {activeSlide === 'liquidity' && <MobileLiquidity data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
-          {activeSlide === 'holo'      && <MobileHolo      data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
-          {activeSlide === 'bank'      && <MobileBank      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+        <MobileContent slideKey={activeSlide} direction={slideDirection}>
+          <SlideErrorBoundary slideName={activeSlide}>
+            {activeSlide === 'overview'  && <MobileOverview  data={financeData} syncLed={syncLed} />}
+            {activeSlide === 'ledger'    && <MobileLedger    data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
+            {activeSlide === 'auspex'    && <MobileAuspex    data={financeData} dbInvestments={dbs?.inv}   dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'liquidity' && <MobileLiquidity data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'holo'      && <MobileHolo      data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
+            {activeSlide === 'bank'      && <MobileBank      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+          </SlideErrorBoundary>
         </MobileContent>
         <MobileNav activeSlide={activeSlide} setActiveSlide={handleNavChange} />
       </MobileShell>
+      </>
     );
   }
 
   // ── Desktop ──
   return (
+    <>
+    <SwUpdateBanner />
+<TimeOfDayTint />
+<IdleLitanyOverlay />
     <CrtShell>
       <ImperialHeader
         isLoading={isLoading}
@@ -99,17 +138,22 @@ function App() {
       <TacticalNav activeSlide={activeSlide} setActiveSlide={handleNavChange} />
 
       <main className="system-content-layer">
-        {activeSlide === 'overview'  && <OverviewSlide    data={financeData} syncLed={syncLed} />}
-        {activeSlide === 'ledger'    && <LedgerSlide      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
-        {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   userId={credentials?.username} />}
-        {activeSlide === 'liquidity' && <LiquiditySlide   data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
-        {activeSlide === 'holo'      && <HoloSlide        data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
-        {activeSlide === 'bank'        && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
-        {activeSlide === 'obligations' && <ObligationsSlide  data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+        <SlideTransition slideKey={activeSlide} direction={slideDirection}>
+          <SlideErrorBoundary slideName={activeSlide}>
+            {activeSlide === 'overview'  && <OverviewSlide    data={financeData} syncLed={syncLed} />}
+            {activeSlide === 'ledger'    && <LedgerSlide      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
+            {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'liquidity' && <LiquiditySlide   data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'holo'      && <HoloSlide        data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
+            {activeSlide === 'bank'        && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'obligations' && <ObligationsSlide  data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+          </SlideErrorBoundary>
+        </SlideTransition>
       </main>
 
       <SystemFooter user={credentials?.username} />
     </CrtShell>
+    </>
   );
 }
 

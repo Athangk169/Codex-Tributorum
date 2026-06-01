@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config
+
+  Default: NO cleartext traffic. System CAs only (covers Tailscale's
+  ACME-issued certs delivered via MagicDNS *.ts.net hostnames).
+
+  Post-HTTPS migration: the cleartext exemption block that used to
+  whitelist the tailnet IP is gone. The app is now strictly HTTPS-only
+  for all outbound traffic.
+-->
 <network-security-config>
-  <domain-config cleartextTrafficPermitted="true">
-    <domain includeSubdomains="true">taild8bd6e.ts.net</domain>
-    <domain includeSubdomains="true">100.92.151.105</domain>
-  </domain-config>
+    <!-- Deny cleartext globally. Only system CAs are trusted -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

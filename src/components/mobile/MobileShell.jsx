@@ -29,7 +29,9 @@
 //     zoom which causes 300ms click delay on older iOS.
 // ─────────────────────────────────────────────────────────────
 
-import React, { useState } from 'react';
+import React from 'react';
+import SlideTransition from '../shared/SlideTransition';
+import CrtAmbient from '../layout/CrtAmbient';
 
 const MOBILE_SHELL_STYLES = `
   /* ── Mobile root ── */
@@ -108,6 +110,7 @@ const MOBILE_SHELL_STYLES = `
       padding-bottom: env(safe-area-inset-bottom);
     }
   }
+
 `;
 
 const MobileShell = ({ children, effectsEnabled = true }) => {
@@ -121,6 +124,9 @@ const MobileShell = ({ children, effectsEnabled = true }) => {
           <>
             <div className="mobile-scanlines" aria-hidden="true" />
             <div className="mobile-vignette"  aria-hidden="true" />
+            {/* Random tube-flicker — longer min delay on mobile to spare
+                battery; capacitor webview composites the overlay cheaply. */}
+            <CrtAmbient minDelayMs={12000} maxDelayMs={28000} />
           </>
         )}
 
@@ -134,9 +140,10 @@ const MobileShell = ({ children, effectsEnabled = true }) => {
 
 // MobileContent is exported separately so App.jsx can wrap just
 // the slide area, keeping Header and Nav outside the scroll zone.
-export const MobileContent = ({ children }) => (
+// When `slideKey` changes, an auspex scan-wipe transition plays.
+export const MobileContent = ({ children, slideKey, direction = 'forward' }) => (
   <div className="mobile-content">
-    {children}
+    <SlideTransition slideKey={slideKey} direction={direction}>{children}</SlideTransition>
   </div>
 );
 

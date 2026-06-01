@@ -2,8 +2,8 @@
   "appId": "com.Sanguinius",
   "appName": "Codex Tributorum",
   "webDir": "dist",
-  
+
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": false
   }
 }

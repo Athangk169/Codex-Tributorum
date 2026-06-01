@@ -1,6 +1,7 @@
 // src/components/slides/MobileHolo.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import ScrambleText from '../../shared/ScrambleText';
+import { useRulesAndCategories } from '../../../hooks/useRulesAndCategories';
 
 // ── Fallback lore ──
 const defaultLoreSnippets = [
@@ -50,11 +51,20 @@ const KeywordTag = ({ kw, onDelete }) => {
 };
 
 const MobileHolo = ({ data, db, userId }) => {
-  const [rules, setRules] = useState([]);
-  const [categoryConfig, setCategoryConfig] = useState({ income_categories: [], neutral_categories: [], expense_categories: [] });
-  
+  // ◈ Data layer: shared hook with optimistic writes ◈
+  const {
+    rules,
+    getCatType,
+    addCategory,
+    deleteCategory,
+    renameCategory,
+    updateType,
+    addKeyword,
+    deleteKeyword,
+  } = useRulesAndCategories(db, userId);
+
   const [selectedRuleId, setSelectedRuleId] = useState('');
-  
+
   // Sheet states
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddKeyword, setShowAddKeyword]   = useState(false);
@@ -65,45 +75,15 @@ const MobileHolo = ({ data, db, userId }) => {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryType, setNewCategoryType] = useState('expense');
   const [editName, setEditName]               = useState('');
-  
-  const [statusMsg, setStatusMsg]             = useState(null);
-  const [loreIdx, setLoreIdx]                 = useState(0);
 
-  // ◈ V2 SCHEMA LOAD ◈
-  const loadRules = useCallback(async () => {
-    if (!db || !userId) return;
+  const [statusMsg, setStatusMsg] = useState(null);
+  const [loreIdx, setLoreIdx]     = useState(0);
 
-    try {
-      const allDocs = await db.allDocs({ 
-        include_docs: true,
-        startkey: `finance:rule:${userId}:`,
-        endkey:   `finance:rule:${userId}:\uffff`
-      });
-
-      const uniqueRules = {};
-      allDocs.rows
-        .map(row => row.doc)
-        .filter(d => d.type === 'finance:rule' && d.user_id === userId && d.is_active)
-        .forEach(rule => { uniqueRules[rule.category_name] = rule; });
-
-      const r = Object.values(uniqueRules).sort((a, b) => a.category_name.localeCompare(b.category_name));
-      setRules(r);
-
-      let config;
-      try {
-        config = await db.get(`finance:config:categories:${userId}`);
-      } catch {
-        config = { _id: `finance:config:categories:${userId}`, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] };
-      }
-      setCategoryConfig(config);
-
-      setSelectedRuleId(prev => (!prev && r.length > 0 ? r[0]._id : prev));
-    } catch (err) {
-      flash('// DB READ FAILURE', true);
-    }
-  }, [db, userId]);
-
-  useEffect(() => { loadRules(); }, [loadRules, userId, data]);
+  // Default-select the first rule once they load (and the user hasn't
+  // already chosen one).
+  useEffect(() => {
+    if (!selectedRuleId && rules.length > 0) setSelectedRuleId(rules[0]._id);
+  }, [rules, selectedRuleId]);
 
   // Lore ticker
   useEffect(() => {
@@ -116,146 +96,76 @@ const MobileHolo = ({ data, db, userId }) => {
     setTimeout(() => setStatusMsg(null), 2500);
   };
 
-  const getCatType = (name) => {
-    if (categoryConfig.income_categories?.includes(name)) return 'income';
-    if (categoryConfig.neutral_categories?.includes(name)) return 'neutral';
-    return 'expense';
-  };
-
+  // ── Handlers — thin wrappers around hook mutations ──────────
   const handleUpdateType = async (categoryName, newType) => {
     try {
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      conf.income_categories  = (conf.income_categories || []).filter(c => c !== categoryName);
-      conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== categoryName);
-      conf.expense_categories = (conf.expense_categories || []).filter(c => c !== categoryName);
-
-      if (newType === 'income') conf.income_categories.push(categoryName);
-      else if (newType === 'neutral') conf.neutral_categories.push(categoryName);
-      else conf.expense_categories.push(categoryName);
-
-      await db.put(conf);
+      await updateType(categoryName, newType);
       flash(`// TYPE RECALIBRATED >> ${newType.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (e) {
+      flash(`// WRITE ERROR :: ${e.message || 'UNKNOWN'}`, true);
+    }
   };
 
   const handleAddKeyword = async () => {
     if (!newKeyword.trim() || !selectedRuleId) return;
-    const rule = rules.find(r => r._id === selectedRuleId);
-    if (!rule) return;
-    const kw = newKeyword.trim().toLowerCase();
-    if (rule.keywords.includes(kw)) { flash('// KEYWORD ALREADY EXISTS', true); return; }
     try {
-      await db.put({ ...rule, keywords: [...rule.keywords, kw], updated: new Date().toISOString() });
+      await addKeyword(selectedRuleId, newKeyword);
+      const kw = newKeyword.trim().toLowerCase();
       setNewKeyword('');
       setShowAddKeyword(false);
       flash(`// KEYWORD UPLINKED >> ${kw.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleDeleteKeyword = async (ruleId, kw) => {
-    const rule = rules.find(r => r._id === ruleId);
-    if (!rule) return;
     try {
-      await db.put({ ...rule, keywords: rule.keywords.filter(k => k !== kw), updated: new Date().toISOString() });
+      await deleteKeyword(ruleId, kw);
       flash(`// KEYWORD PURGED >> ${kw.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleAddCategory = async () => {
     const name = newCategoryName.trim();
-    if (!name || !userId) return;
-
-    const slug = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const id = `finance:rule:${userId}:${slug}`;
-
-    if (rules.find(r => r._id === id || r.category_name.toLowerCase() === name.toLowerCase())) {
-      flash('// CATEGORY ALREADY EXISTS', true);
-      return;
-    }
-
+    if (!name) return;
     try {
-      await db.put({
-        _id: id, type: 'finance:rule', user_id: userId,
-        category_name: name, keywords: [], is_active: true,
-        created: new Date().toISOString(), updated: new Date().toISOString()
-      });
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      if (newCategoryType === 'income') conf.income_categories.push(name);
-      else if (newCategoryType === 'neutral') conf.neutral_categories.push(name);
-      else conf.expense_categories.push(name);
-
-      await db.put(conf);
-
+      const newId = await addCategory(name, newCategoryType);
       setNewCategoryName('');
       setNewCategoryType('expense');
       setShowAddCategory(false);
       flash(`// CATEGORY INITIALIZED >> ${name.toUpperCase()}`);
-      setSelectedRuleId(id);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+      if (newId) setSelectedRuleId(newId);
+    } catch (e) {
+      flash(`// ${e.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleDeleteCategory = async (rule, e) => {
     e.stopPropagation();
     try {
-      await db.remove(rule);
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      conf.income_categories  = (conf.income_categories || []).filter(c => c !== rule.category_name);
-      conf.neutral_categories = (conf.neutral_categories || []).filter(c => c !== rule.category_name);
-      conf.expense_categories = (conf.expense_categories || []).filter(c => c !== rule.category_name);
-
-      await db.put(conf);
-
+      await deleteCategory(rule);
       if (selectedRuleId === rule._id) setSelectedRuleId('');
       flash(`// CATEGORY EXPUNGED >> ${rule.category_name.toUpperCase()}`);
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (err) {
+      flash(`// ${err.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const handleRenameSubmit = async (e) => {
     e.stopPropagation();
     const newName = editName.trim();
     if (!newName || !editingRule) return;
-    const rule = rules.find(r => r._id === editingRule._id);
-    if (!rule) return;
-    const oldName = rule.category_name;
-
     try {
-      await db.put({ ...rule, category_name: newName, updated: new Date().toISOString() });
-
-      const confId = `finance:config:categories:${userId}`;
-      let conf;
-      try { conf = await db.get(confId); } 
-      catch { conf = { _id: confId, type: 'finance:config', user_id: userId, income_categories: [], neutral_categories: [], expense_categories: [] }; }
-
-      conf.income_categories  = (conf.income_categories || []).map(c => c === oldName ? newName : c);
-      conf.neutral_categories = (conf.neutral_categories || []).map(c => c === oldName ? newName : c);
-      conf.expense_categories = (conf.expense_categories || []).map(c => c === oldName ? newName : c);
-
-      await db.put(conf);
-
+      await renameCategory(editingRule._id, newName);
       flash(`// CATEGORY RENAMED >> ${newName.toUpperCase()}`);
       setEditingRule(null);
       setEditName('');
-      loadRules();
-    } catch { flash('// WRITE ERROR', true); }
+    } catch (err) {
+      flash(`// ${err.message || 'WRITE ERROR'}`, true);
+    }
   };
 
   const selectedRule = rules.find(r => r._id === selectedRuleId);
@@ -279,6 +189,43 @@ const MobileHolo = ({ data, db, userId }) => {
           transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
         }
         .holo-sheet.open { transform: translateY(0); }
+
+        .mob-action-btn {
+          background: transparent;
+          border: 1px solid var(--border);
+          color: var(--text-d);
+          font-size: 9px;
+          padding: 5px 10px;
+          font-family: var(--mono);
+          letter-spacing: 1px;
+          cursor: pointer;
+          transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+        .mob-action-btn:active { background: rgba(204,34,0,0.08); }
+        .mob-action-btn.del { border-color: #cc2200; color: #cc2200; }
+        .mob-action-btn.del:active { background: rgba(204,34,0,0.2); }
+        .mob-action-btn.edit-active { border-color: var(--amber, #eab308); color: var(--amber, #eab308); }
+
+        .mech-select {
+          -webkit-appearance: none;
+          appearance: none;
+          background-color: rgba(2,8,4,0.7);
+          background-image: linear-gradient(45deg, transparent 50%, var(--ba-gold-dim, #b8923e) 50%),
+                            linear-gradient(135deg, var(--ba-gold-dim, #b8923e) 50%, transparent 50%);
+          background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+          background-size: 5px 5px, 5px 5px;
+          background-repeat: no-repeat;
+          padding-right: 24px !important;
+          color: var(--text-m, #b8923e);
+          border: 1px solid var(--border);
+          font-family: var(--mono);
+          border-radius: 0;
+        }
+        .mech-select:focus {
+          border-color: var(--ba-crimson, #cc2200);
+          outline: none;
+          box-shadow: inset 0 0 10px rgba(204,34,0,0.15);
+        }
       `}</style>
 
       {/* ── TOP HEADER / STATUS ── */}

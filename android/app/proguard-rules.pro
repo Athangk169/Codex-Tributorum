@@ -1,21 +1,41 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# ── Codex Tributorum — ProGuard / R8 rules ─────────────────────────
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep the bits Capacitor + plugins reach into via reflection (the JS
+# bridge calls Java by class/method name at runtime, so R8 mustn't
+# rename or strip them).
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep stack traces sensible if something does crash in release.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ── Capacitor core / JS bridge ──
+-keep public class com.getcapacitor.** { *; }
+-keep public class com.getcapacitor.plugin.** { *; }
+-keepattributes *Annotation*
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keepclassmembers class * {
+    @com.getcapacitor.PluginMethod public *;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ── App entry point ──
+-keep class com.Sanguinius.** { *; }
+
+# ── WebView <-> JS bridge ──
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# ── Cordova compatibility plugins shim ──
+-keep class org.apache.cordova.** { *; }
+
+# ── AndroidX components used via reflection ──
+-keep class androidx.appcompat.** { *; }
+-keep class androidx.coordinatorlayout.** { *; }
+-keep class androidx.core.splashscreen.** { *; }
+
+# ── Strip debug logs from the release bundle ──
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+}

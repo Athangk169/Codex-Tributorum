@@ -28,11 +28,11 @@ const PersistentUI = ({ data, children, currentTab, onTabChange }) => {
           <div className="ticker-track">
             {/* Original Set */}
             {headerItems.map((item, i) => (
-              <span key={`h1-${i}`} className="t-item">{item.label} <em>₹ {item.val?.toLocaleString()}</em></span>
+              <span key={`h1-${i}`} className="t-item">{item.label} <em>{item.val?.toLocaleString()}</em></span>
             ))}
             {/* Duplicated Set for Seamless Loop */}
             {headerItems.map((item, i) => (
-              <span key={`h2-${i}`} className="t-item">{item.label} <em>₹ {item.val?.toLocaleString()}</em></span>
+              <span key={`h2-${i}`} className="t-item">{item.label} <em>{item.val?.toLocaleString()}</em></span>
             ))}
           </div>
         </div>

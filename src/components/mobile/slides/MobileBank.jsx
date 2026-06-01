@@ -209,7 +209,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
   const { state: auditState, days: daysSinceAudit } = getAuditState(selectedAccount?.last_audited_date);
   const auditLabel = AUDIT_LABELS[auditState];
 
-  const fmt = (n) => `₹ ${Math.abs(n || 0).toLocaleString()}`;
+  const fmt = (n) => `${Math.abs(n || 0).toLocaleString()}`;
 
   // ─────────────────────────────────────────────
   // RENDER
@@ -730,7 +730,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
           {balances.total > 0 && (
             <div className="mb-total mb-bracketed">
               <div className="mb-total-label">Total Reserves</div>
-              <div className="mb-total-amt">₹{balances.total.toLocaleString()}</div>
+              <div className="mb-total-amt">{balances.total.toLocaleString()}</div>
             </div>
           )}
 
@@ -758,7 +758,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
                     </div>
                     {accMin > 0 && (
                       <div className="mb-acc-balance-min">
-                        MIN ₹{(accMin / 1000).toFixed(0)}k
+                        MIN {(accMin / 1000).toFixed(0)}k
                       </div>
                     )}
                   </div>
@@ -784,7 +784,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
           <div className="mb-balance-panel mb-bracketed">
             <div className="mb-balance-label">CURRENT LIQUIDITY</div>
             <div className={`mb-balance-amt ${isBalanceCritical ? 'critical' : 'healthy'}`}>
-              ₹ <ScrambleText text={Math.abs(activeBalance).toLocaleString()} />
+              <ScrambleText text={Math.abs(activeBalance).toLocaleString()} />
             </div>
             <div className="mb-telemetry">
               <div
@@ -793,7 +793,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
               />
             </div>
             <div className="mb-balance-meta">
-              {minBalance > 0 && <span>RESERVE FLOOR: ₹{minBalance.toLocaleString()}</span>}
+              {minBalance > 0 && <span>RESERVE FLOOR: {minBalance.toLocaleString()}</span>}
               <span>{selectedAccount.bank_name || 'NO INSTITUTION FILED'}</span>
             </div>
           </div>
@@ -840,7 +840,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
                     <div className="mb-txn-cat">{txn.category || 'UNKNOWN CLASS'}</div>
                   </div>
                   <div className={`mb-txn-amt ${isNeg ? 'neg' : 'pos'}`}>
-                    {isNeg ? '' : '+'}₹{Math.abs(txn.amount).toLocaleString()}
+                    {isNeg ? '' : '+'}{Math.abs(txn.amount).toLocaleString()}
                   </div>
                 </div>
               );
@@ -904,7 +904,7 @@ const MobileBank = ({ data, dbTransactions, dbMetadata, userId }) => {
             />
           </div>
           <div className="mb-field">
-            <label className="mb-label">Minimum Reserve (₹)</label>
+            <label className="mb-label">Minimum Reserve</label>
             <input
               className="mb-input"
               type="number"

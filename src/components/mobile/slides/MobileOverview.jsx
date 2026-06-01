@@ -1,6 +1,7 @@
 // src/components/slides/mobile/MobileOverview.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ScrambleText from '../../shared/ScrambleText';
+import LoreTicker from '../../shared/LoreTicker';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVO SKULL 3D VIEWER  (ported 1:1 from OverviewSlide, mobile sizing)
@@ -410,7 +411,7 @@ const STYLES = `
     padding: 7px 0; border-bottom: 1px dashed rgba(74,10,0,0.35); font-size: 10px;
   }
   .mo-ar-tag { color: #b8923e; letter-spacing: 1px; text-transform: uppercase; font-family: var(--mono, monospace); }
-  .mo-ar-amt { color: var(--border-hi, #4ade80); font-weight: bold; font-family: var(--mono, monospace); }
+  .mo-ar-amt { color: #e0c070; font-weight: bold; font-family: var(--mono, monospace); text-shadow: 0 0 6px rgba(224,192,112,0.35); }
   .mo-ar-clear {
     background: transparent; border: 1px solid #2a0800; color: #4a2010;
     font-family: var(--mono, monospace); font-size: 8px; padding: 3px 7px;
@@ -490,22 +491,28 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
 
   const bank       = buckets.Bank ?? data?.liveBalances?.total ?? 0;
   const cash       = buckets.Cash       || 0;
-  const cardTotal  = buckets.Card       || 0;
   const ar         = buckets.AR         || 0;
   const provisions = buckets.Provisions || 0;
 
+  // ── Card obligations (aggregated across all cards) ──
+  const formatDateShort = (ds) => {
+    if (!ds) return '—';
+    const d = new Date(ds);
+    if (isNaN(d)) return ds;
+    const mon = d.toLocaleString('en-GB', { month: 'short' }).toUpperCase();
+    return `${d.getDate()} ${mon}`;
+  };
+  const upcomingBuckets = (data?.cardObligations?.allBuckets || []).filter(b => b.status !== 'paid');
+  const cardTotal       = data?.totalDebt ?? (buckets.Card || 0);
+  const totalDebt       = cardTotal;
+  const totalCardDebt   = cardTotal;
+
   // Three distinct financial views — matching desktop
   const liquidReserve  = bank + cash;
+  const fundsAvailable = liquidReserve;
   const netPosition    = liquidReserve - cardTotal;
   const totalCardLimit = (data?.cards || []).reduce((sum, c) => sum + (c.limit || 0), 0);
   const creditHeadroom = Math.max(0, totalCardLimit - cardTotal);
-
-  // ── Card obligations ──
-  const nextBucket = data?.cardObligations?.buckets?.find(b => b.status !== 'paid') || {};
-  const ccDueAmt   = nextBucket.outstanding || 0;
-  const ccDueDate  = nextBucket.due_date ? formatDateToText(nextBucket.due_date) : 'NO DEBT DETECTED';
-  const totalDebt  = data?.totalDebt || 0;
-  const fundsAvailable = bank + cash - totalDebt;
 
   // ── Global Auditor state ──
   const bankAccounts = (data?.accounts || []).filter(a => a.parent === 'Bank');
@@ -602,11 +609,16 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
           <div className="mo-ttl" style={{ color: '#4ade80', borderBottomColor: 'rgba(74,222,128,0.2)' }}>
             FUNDS AVAILABLE
           </div>
-          <div className={`mo-val ${fundsAvailable < 0 ? 'expense' : 'ok'}`} style={{ fontSize: '32px' }}>
-            ₹ <ScrambleText text={fundsAvailable.toLocaleString()} speed={80} step={0.067} />
+          <div className={`mo-val ${totalDebt > fundsAvailable ? 'expense' : 'ok'}`} style={{ fontSize: '32px' }}>
+            <ScrambleText text={fundsAvailable.toLocaleString()} speed={80} step={0.067} />
           </div>
-          <div style={{ fontSize: '9px', color: '#4a2010', marginTop: '6px', letterSpacing: '1px' }}>
-            BANK {bank > 0 ? `₹${bank.toLocaleString()}` : '—'} · CASH {cash > 0 ? `₹${cash.toLocaleString()}` : '—'} · DEBT {totalDebt > 0 ? `₹${totalDebt.toLocaleString()}` : 'NONE'}
+          <div style={{ fontSize: '9px', marginTop: '6px', letterSpacing: '1px' }}>
+            <span style={{ color: '#4a2010' }}>
+              BANK {bank > 0 ? `${bank.toLocaleString()}` : '—'} · CASH {cash > 0 ? `${cash.toLocaleString()}` : '—'} ·{' '}
+            </span>
+            <span style={{ color: totalDebt > 0 ? '#cc2200' : '#4a2010' }}>
+              DEBT {totalDebt > 0 ? `${totalDebt.toLocaleString()}` : 'NONE'}
+            </span>
           </div>
         </div>
 
@@ -614,31 +626,31 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>GROSS TITHE</div>
-            <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={income.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className={`mo-val ${income === 0 ? 'white' : ''}`} style={{ fontSize: '18px' }}><ScrambleText text={income.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>TOTAL EXPEND</div>
-            <div className="mo-val expense" style={{ fontSize: '18px' }}>₹ <ScrambleText text={expense.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className={`mo-val ${expense === 0 ? 'white' : 'expense'}`} style={{ fontSize: '18px' }}><ScrambleText text={expense.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>BANK RESERVE</div>
-            <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={bank.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className={`mo-val ${bank === 0 ? 'white' : ''}`} style={{ fontSize: '18px' }}><ScrambleText text={bank.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>CASH RESERVE</div>
-            <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={cash.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className={`mo-val ${cash === 0 ? 'white' : ''}`} style={{ fontSize: '18px' }}><ScrambleText text={cash.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>NET POSITION</div>
             <div className={`mo-val ${netPosition >= 0 ? 'ok' : 'red'}`} style={{ fontSize: '18px' }}>
-              ₹ <ScrambleText text={netPosition.toLocaleString()} speed={80} step={0.067} />
+              <ScrambleText text={netPosition.toLocaleString()} speed={80} step={0.067} />
             </div>
             <div style={{ fontSize: '8px', color: '#4a2010', marginTop: '4px', letterSpacing: '1px' }}>LIQUID − DEBT</div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px', color: '#eab308' }}>CREDIT HEADROOM</div>
             <div className="mo-val amber" style={{ fontSize: '18px' }}>
-              ₹ <ScrambleText text={creditHeadroom.toLocaleString()} speed={80} step={0.067} />
+              <ScrambleText text={creditHeadroom.toLocaleString()} speed={80} step={0.067} />
             </div>
             <div style={{ fontSize: '8px', color: '#4a2010', marginTop: '4px', letterSpacing: '1px' }}>LIMIT − UTILISED</div>
           </div>
@@ -655,7 +667,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
             <div style={{ flex: 1 }}>
               <div className="mo-row">
                 <span className="mo-rl">DATA CYCLE</span>
-                <span className="mo-rv"><ScrambleText text={new Date().toLocaleDateString('en-GB')} /></span>
+                <span className="mo-rv"><ScrambleText text={formatDateToText(new Date().toISOString())} /></span>
               </div>
               <div className="mo-row">
                 <span className="mo-rl">UPLINK</span>
@@ -674,22 +686,64 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
               </div>
             </div>
           </div>
+          <div style={{
+            marginTop: '10px',
+            paddingTop: '8px',
+            borderTop: '1px solid #2a0800',
+          }}>
+            <LoreTicker style={{ fontSize: '7.5px', letterSpacing: '0.4px' }} />
+          </div>
         </div>
 
         {/* ── 4. IMPENDING OBLIGATIONS ── */}
-        <div className="mo-panel" style={{ textAlign: 'center' }}>
-          <div className="mo-ttl" style={{ textAlign: 'left' }}>IMPENDING OBLIGATIONS</div>
-          <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>NEXT RITUAL DUE DATE</div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: ccDueAmt > 0 ? '#e0c070' : 'var(--border-hi)', fontFamily: 'var(--mono)' }}>
-            <ScrambleText text={ccDueDate} />
-          </div>
-          <div className="mo-divider" />
-          <div style={{ fontSize: '9px', color: ccDueAmt > 0 ? '#cc2200' : '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
-            BLOOD DEBT OUTSTANDING
-          </div>
-          <div className={`mo-val ${ccDueAmt > 0 ? 'ov-debt-warn glitch-crit' : 'ov-debt-ok'}`} style={{ fontSize: '26px' }}>
-            ₹ <ScrambleText text={ccDueAmt.toLocaleString()} />
-          </div>
+        <div className="mo-panel">
+          <div className="mo-ttl">IMPENDING OBLIGATIONS</div>
+          {upcomingBuckets.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '6px 0' }}>
+              <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
+                BLOOD DEBT
+              </div>
+              <div className="mo-val ov-debt-ok" style={{ fontSize: '26px' }}>
+                <ScrambleText text="0" />
+              </div>
+              <div style={{ fontSize: '9px', color: '#b8923e', letterSpacing: '2px', marginTop: '4px' }}>
+                NO DEBT DETECTED
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '6px', letterSpacing: '2px' }}>
+                UPCOMING DUES
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {upcomingBuckets.map(b => (
+                  <div key={b.due_date} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                    fontFamily: 'var(--mono)', fontSize: '13px',
+                    padding: '3px 0',
+                  }}>
+                    <span style={{
+                      color: b.status === 'overdue' ? '#cc2200' : '#e0c070',
+                      letterSpacing: '1px',
+                    }}>
+                      {formatDateShort(b.due_date)}
+                      {b.status === 'overdue' && <span style={{ fontSize: '9px', marginLeft: '4px' }}>LATE</span>}
+                    </span>
+                    <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                      {Math.round(b.outstanding).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="mo-divider" />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ fontSize: '9px', color: '#cc2200', letterSpacing: '2px' }}>BLOOD DEBT</span>
+                <span className="mo-val ov-debt-warn glitch-crit" style={{ fontSize: '22px' }}>
+                  <ScrambleText text={totalCardDebt.toLocaleString()} />
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ── 5. RECOVERY MANIFEST ── */}
@@ -700,7 +754,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
               <div key={tag} className="mo-ar-row">
                 <span className="mo-ar-tag">{tag}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span className="mo-ar-amt">₹ {Math.round(amt).toLocaleString()}</span>
+                  <span className="mo-ar-amt">{Math.round(amt).toLocaleString()}</span>
                   {dbTransactions && (
                     <button className="mo-ar-clear" onClick={() => handleClearAR(tag, amt)}>
                       CLEAR
@@ -711,8 +765,8 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #2a0800', fontSize: '9px' }}>
               <span style={{ color: '#b8923e', letterSpacing: '1px' }}>TOTAL OUTSTANDING</span>
-              <span style={{ color: 'var(--border-hi, #4ade80)', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                ₹ {Math.round(openAR.reduce((s,[,a]) => s+a, 0)).toLocaleString()}
+              <span style={{ color: '#e0c070', fontWeight: 'bold', fontFamily: 'var(--mono)', textShadow: '0 0 6px rgba(224,192,112,0.35)' }}>
+                {Math.round(openAR.reduce((s,[,a]) => s+a, 0)).toLocaleString()}
               </span>
             </div>
           </div>
@@ -722,11 +776,11 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>REIMBURSE</div>
-            <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={ar.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className="mo-val" style={{ fontSize: '18px' }}><ScrambleText text={ar.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>PROVISIONS</div>
-            <div className="mo-val white" style={{ fontSize: '18px' }}>₹ <ScrambleText text={provisions.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className="mo-val white" style={{ fontSize: '18px' }}><ScrambleText text={provisions.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
         </div>
 
@@ -742,7 +796,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
                   <div key={cat}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#b8923e', letterSpacing: '1px', marginBottom: '4px' }}>
                       <span>{cat.toUpperCase()}</span>
-                      <span>₹ {amt.toLocaleString()}</span>
+                      <span>{amt.toLocaleString()}</span>
                     </div>
                     <div style={{ width: '100%', height: '2px', background: '#2a0800' }}>
                       <div style={{ height: '100%', width: `${pct}%`, background: '#cc2200', boxShadow: '0 0 4px #cc2200', transition: 'width 0.6s ease' }} />
@@ -762,11 +816,11 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
               <div style={{ fontSize: '9px', color: '#7a4a20', letterSpacing: '1px' }}>NET INCOME</div>
-              <div className="mo-val" style={{ fontSize: '18px' }}>₹ <ScrambleText text={netIncome.toLocaleString()} /></div>
+              <div className="mo-val" style={{ fontSize: '18px' }}><ScrambleText text={netIncome.toLocaleString()} /></div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
               <div style={{ fontSize: '9px', color: '#7a4a20', letterSpacing: '1px' }}>NET EXPENDITURE</div>
-              <div className="mo-val expense" style={{ fontSize: '18px' }}>₹ <ScrambleText text={netExpense.toLocaleString()} /></div>
+              <div className="mo-val expense" style={{ fontSize: '18px' }}><ScrambleText text={netExpense.toLocaleString()} /></div>
             </div>
           </div>
         </div>
@@ -812,7 +866,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
                         <span style={{ color: '#fff' }}>{displayName}</span>
                         <span style={{ color: '#3a0800' }}>—</span>
-                        <span className={isNeg ? 'mo-amt-neg' : 'mo-amt-pos'}>{isNeg ? '' : '+'}₹{Math.abs(tx.amount).toLocaleString()}</span>
+                        <span className={isNeg ? 'mo-amt-neg' : 'mo-amt-pos'}>{isNeg ? '' : '+'}{Math.abs(tx.amount).toLocaleString()}</span>
                       </div>
                       <div style={{ color: '#4a2010', fontSize: '8px' }}>{tx.category} VIA {accName}</div>
                     </div>

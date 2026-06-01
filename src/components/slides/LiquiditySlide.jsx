@@ -11,7 +11,7 @@ const ScrambleText = ({ text }) => {
     const strText = String(text);
     const iv = setInterval(() => {
       setDisplay(strText.split('').map((char, i) => {
-        if (char === ' ' || char === '₹' || char === ',') return char;
+        if (char === ' ' || char === ',') return char;
         if (i < iter) return char;
         return chars[Math.floor(Math.random() * chars.length)];
       }).join(''));
@@ -341,7 +341,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                           {c.name}
                           {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '10px', marginLeft: '5px' }}>[PRI]</span>}
                         </td>
-                        <td style={{ color: 'var(--text-d)', fontFamily: 'var(--mono)' }}>₹{fmtLimit(c.limit)}</td>
+                        <td style={{ color: 'var(--text-d)', fontFamily: 'var(--mono)' }}>{fmtLimit(c.limit)}</td>
                         <td style={{ color: 'var(--text-d)' }}>BILL {c.billing_day} / DUE {c.due_day}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button className="action-btn" onClick={() => setForm({ _docId: c._id, name: c.name, billing_day: c.billing_day, due_day: c.due_day, due_month_offset: c.due_month_offset, limit: c.limit || 0, is_default: !!c.is_default })}>EDIT</button>
@@ -380,7 +380,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '10px', color: 'var(--ba-crimson)', marginBottom: '4px', fontWeight: 'bold', letterSpacing: '1px' }}>REQUIRED TITHE</div>
                     <div className={nextBucket.outstanding > 0 ? 'warn' : 'ok'} style={{ fontSize: '26px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                      ₹ <ScrambleText text={(nextBucket.outstanding || 0).toLocaleString()} />
+                      <ScrambleText text={(nextBucket.outstanding || 0).toLocaleString()} />
                     </div>
                   </div>
                 </div>
@@ -418,13 +418,13 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                   </div>
                   <div className="row" style={{ padding: 0 }}>
                     <span className="rl">MAXIMUM YIELD LIMIT</span>
-                    <span className="rv">₹ {localCardInfo.limit ? localCardInfo.limit.toLocaleString() : 'UNSET'}</span>
+                    <span className="rv">{localCardInfo.limit ? localCardInfo.limit.toLocaleString() : 'UNSET'}</span>
                   </div>
                   <div style={{ borderTop: '1px dashed var(--ba-border-lo)', paddingTop: '10px', marginTop: '2px' }}>
                     <div className="row" style={{ padding: 0 }}>
                       <span className="rl" style={{ fontSize: '13px', color: 'var(--ba-gold-dim)' }}>TOTAL PENDING DEBT</span>
                       <span className="rv warn" style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                        ₹ <ScrambleText text={totalPendingDebt.toLocaleString()} />
+                        <ScrambleText text={totalPendingDebt.toLocaleString()} />
                       </span>
                     </div>
                     {localCardInfo.limit > 0 && (
@@ -485,13 +485,13 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                           </span>
                         </td>
                         <td style={{ color: 'var(--ba-gold-mute)', fontSize: '11px', verticalAlign: 'top', paddingTop: '12px', fontFamily: 'var(--mono)' }}>
-                          ₹ {b.total?.toLocaleString()}
+                          {b.total?.toLocaleString()}
                         </td>
                         <td style={{ color: 'var(--border-hi)', fontSize: '11px', verticalAlign: 'top', paddingTop: '12px', fontFamily: 'var(--mono)' }}>
-                          ₹ {b.paid?.toLocaleString()}
+                          {b.paid?.toLocaleString()}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 'bold', verticalAlign: 'top', paddingTop: '12px', color: b.status === 'paid' ? 'var(--text-d)' : 'var(--ba-crimson)', fontSize: '14px' }}>
-                          ₹ {b.outstanding.toLocaleString()}
+                          {b.outstanding.toLocaleString()}
                         </td>
                       </tr>
                     )) : (

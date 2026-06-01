@@ -1,6 +1,7 @@
 // src/components/mobile/MobileBootScreen.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { AudioCore } from '../../utils/audioCore';
+import { couchLogin } from '../../utils/couchAuth';
 
 // ── Shorter, mobile-specific boot sequence ──────────────────────
 const bootSequence = [
@@ -44,7 +45,7 @@ const MobileBootScreen = ({ onComplete }) => {
   const [username, setUsername]                 = useState('');
   const [password, setPassword]                 = useState('');
   const [host, setHost]                         = useState(
-    localStorage.getItem('COGITATOR_UPLINK_HOST') || '192.168.29.100:5984'
+    localStorage.getItem('COGITATOR_UPLINK_HOST') || 'laptop-lg23d2mc.taild8bd6e.ts.net/db'
   );
   const [showHostEdit, setShowHostEdit]         = useState(false);
   const [authError, setAuthError]               = useState('');
@@ -53,21 +54,12 @@ const MobileBootScreen = ({ onComplete }) => {
 
   const terminalRef = useRef(null);
 
-  // ◈ PRE-FILL CACHED CREDENTIALS ◈
+  // ◈ PRE-FILL CACHED USERNAME ◈
+  // Password is no longer persisted — only the username is. See
+  // BootScreen.jsx for full rationale.
   useEffect(() => {
-    const token = localStorage.getItem('mech_auth_token');
-    if (token) {
-      try {
-        const decoded = atob(token);
-        const [savedUser, savedPass] = decoded.split(':');
-        if (savedUser && savedPass) {
-          setUsername(savedUser);
-          setPassword(savedPass);
-        }
-      } catch (e) {
-        console.error('◈ SCRAP CODE IN CACHE: TOKEN REJECTED ◈');
-      }
-    }
+    const savedUser = localStorage.getItem('mech_username');
+    if (savedUser) setUsername(savedUser);
   }, []);
 
   // Auto-scroll terminal
@@ -125,6 +117,9 @@ const MobileBootScreen = ({ onComplete }) => {
   }, [phase, currentLineIndex, currentCharIndex, onComplete, username, password]);
 
   // ── Auth handler ─────────────────────────────────────────────
+  // Uses CouchDB /_session for cookie-based auth (the cookie is
+  // HttpOnly and unreadable from JS). Password is held in React
+  // state for the session only, never persisted.
   const handleAuth = async () => {
     if (!username.trim() || !password.trim()) {
       setAuthError('// ERROR: CREDENTIALS INCOMPLETE');
@@ -136,30 +131,32 @@ const MobileBootScreen = ({ onComplete }) => {
 
     const cleanUser = username.trim();
     const cleanPass = password.trim();
-    const token     = btoa(`${cleanUser}:${cleanPass}`);
-    const protocol  = 'http://';
 
     try {
-      const headers = new Headers();
-      headers.set('Authorization', 'Basic ' + token);
-
-      const response = await fetch(`${protocol}${host}/metadata_vault`, { method: 'GET', headers });
-
-      if (response.ok) {
-        localStorage.setItem('mech_auth_token', token);
-        setAuthError('');
-        setIsAuthenticating(false);
-        setPhase('prompt');
-      } else if (response.status === 401) {
+      await couchLogin(host, cleanUser, cleanPass);
+      localStorage.setItem('mech_username', cleanUser);
+      setAuthError('');
+      setIsAuthenticating(false);
+      setPhase('prompt');
+    } catch (err) {
+      if (err?.status === 401) {
         setAuthError('// ERROR: CREDENTIALS REJECTED');
         setIsAuthenticating(false);
-      } else {
-        setAuthError('// ERROR: VAULT LOCKDOWN ACTIVE');
-        setIsAuthenticating(false);
+        return;
       }
-    } catch (err) {
-      const cachedToken = localStorage.getItem('mech_auth_token');
-      if (cachedToken === token) {
+      if (err?.status === 404) {
+        setAuthError('// ERROR: SESSION ENDPOINT NOT FOUND — CHECK HOST PATH');
+        setIsAuthenticating(false);
+        return;
+      }
+      if (err?.status) {
+        setAuthError(`// ERROR: VAULT REJECTED REQUEST [${err.status}]`);
+        setIsAuthenticating(false);
+        return;
+      }
+      // No status → network-level failure (DNS, refused, TLS, …).
+      const cachedUser = localStorage.getItem('mech_username');
+      if (cachedUser === cleanUser) {
         setIsOffline(true);
         setAuthError('// WARNING: OFFLINE MODE ENGAGED');
         setTimeout(() => {

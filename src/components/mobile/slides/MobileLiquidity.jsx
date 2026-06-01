@@ -206,7 +206,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     onClick={() => { setActiveCardId(c._id); setShowCardSelect(false); }}
                   >
                     {c.name} {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '9px' }}>[PRI]</span>}
-                    <span style={{ float: 'right', color: 'var(--text-d)' }}>₹{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'}</span>
+                    <span style={{ float: 'right', color: 'var(--text-d)' }}>{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'}</span>
                   </div>
                 )) : (
                   <div className="card-dropdown-item">NO LINES CONFIGURED</div>
@@ -248,7 +248,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                   <input type="number" name="due_month_offset" value={form.due_month_offset} onChange={handleInputChange} className="mech-input" min="0" max="3" style={{ width: '100%' }} />
                 </div>
                 <div>
-                  <label className="kpi-lbl" style={{ fontSize: '9px' }}>YIELD LIMIT (₹)</label>
+                  <label className="kpi-lbl" style={{ fontSize: '9px' }}>YIELD LIMIT</label>
                   <input type="number" name="limit" value={form.limit} onChange={handleInputChange} className="mech-input" min="0" style={{ width: '100%' }} />
                 </div>
               </div>
@@ -282,7 +282,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     <span style={{ color: '#fff', fontSize: '11px' }}>{c.name}</span>
                     {c.is_default && <span style={{ color: 'var(--ba-gold)', fontSize: '9px', marginLeft: '6px' }}>[PRI]</span>}
                     <div style={{ fontSize: '10px', color: 'var(--text-d)', marginTop: '2px' }}>
-                      ₹{c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'} · BILL {c.billing_day} / DUE {c.due_day}
+                      {c.limit ? (c.limit / 1000).toFixed(0) + 'k' : '--'} · BILL {c.billing_day} / DUE {c.due_day}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
@@ -318,7 +318,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '10px', color: 'var(--ba-crimson)', marginBottom: '4px', fontWeight: 'bold' }}>REQUIRED TITHE</div>
                 <div className={nextBucket.outstanding > 0 ? 'warn pulse' : 'ok'} style={{ fontSize: '22px', fontWeight: 'bold' }}>
-                  ₹ <ScrambleText text={(nextBucket.outstanding || 0).toLocaleString()} />
+                  <ScrambleText text={(nextBucket.outstanding || 0).toLocaleString()} />
                 </div>
               </div>
             </div>
@@ -358,12 +358,12 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
               </div>
               <div className="row" style={{ padding: 0 }}>
                 <span className="rl">YIELD LIMIT</span>
-                <span className="rv">₹ {localCardInfo.limit ? localCardInfo.limit.toLocaleString() : 'UNSET'}</span>
+                <span className="rv">{localCardInfo.limit ? localCardInfo.limit.toLocaleString() : 'UNSET'}</span>
               </div>
               <div className="row" style={{ padding: 0, marginTop: '6px', borderTop: '1px dashed var(--ba-border-lo)', paddingTop: '10px' }}>
                 <span className="rl" style={{ fontSize: '12px', color: 'var(--ba-gold-dim)' }}>TOTAL PENDING DEBT</span>
                 <span className="rv warn" style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                  ₹ <ScrambleText text={totalPendingDebt.toLocaleString()} />
+                  <ScrambleText text={totalPendingDebt.toLocaleString()} />
                 </span>
               </div>
 
@@ -422,7 +422,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontSize: '10px', color: 'var(--text-d)' }}>OUTSTANDING TITHE</span>
                       <span className={b.status === 'overdue' ? 'warn' : 'ok'} style={{ fontWeight: 'bold', fontSize: '14px' }}>
-                        ₹ <ScrambleText text={(b.outstanding || 0).toLocaleString()} />
+                        <ScrambleText text={(b.outstanding || 0).toLocaleString()} />
                       </span>
                     </div>
                   </div>

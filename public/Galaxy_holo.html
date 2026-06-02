@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>THE IMPERIUM — GALACTIC SURVEY</title>
+
+    <link rel="stylesheet" href="holo/holo.css" />
+    <style>
+      :root {
+        /* Imperial gold base (matches Terra's family) */
+        --accent:           #ffcc22;
+        --accent-soft:      rgba(255, 205, 0, 0.7);
+        --accent-strong:    rgba(255, 210, 0, 0.75);
+        --accent-dim:       rgba(210, 165, 0, 0.55);
+        --accent-glow:      rgba(255, 200, 0, 0.3);
+        --accent-glow-inset:rgba(255, 200, 0, 0.08);
+        --accent-pulse:     rgba(255, 220, 0, 0.65);
+        --accent-pulse-inset:rgba(255, 200, 0, 0.16);
+        --accent-hover:     rgba(255, 185, 0, 0.14);
+
+        --loading:          #cc9900;
+        --loading-bg:       rgba(200, 150, 0, 0.2);
+        --loading-glow:     #ffcc00;
+
+        --corner:           rgba(210, 165, 0, 0.5);
+
+        --scan-a:           rgba(255, 200, 0, 0.22);
+        --scan-b:           rgba(150, 90, 200, 0.40);   /* faint warp-violet sweep */
+
+        --label:            #ffd24a;
+        --label-shadow:     rgba(255, 205, 0, 0.9);
+        --label-border:     rgba(255, 200, 0, 0.35);
+        --label-dot:        #ffcc00;
+        --label-dot-glow:   #ffcc00;
+        --label-dot-aura:   rgba(255, 200, 0, 0.5);
+        --label-dot-strong: #ffdd55;
+        --label-dot-strong-aura: rgba(255, 220, 0, 0.7);
+
+        --sigil:            rgba(255, 210, 0, 0.35);
+        --sigil-glow:       rgba(255, 200, 0, 0.5);
+
+        --astro:            rgba(255, 215, 80, 0.4);
+        --astro-bright:     rgba(255, 235, 120, 1);
+        --astro-glow:       rgba(255, 220, 80, 0.8);
+
+        --sweep-a:          rgba(255, 185, 0, 0.02);
+        --sweep-b:          rgba(150, 90, 200, 0.08);
+        --sweep-c:          rgba(255, 225, 50, 0.05);
+        --point-glow:       rgba(255, 220, 80, 0.9);
+        --point-aura:       rgba(150, 90, 200, 0.45);
+        --beam:             rgba(255, 210, 0, 0.7);
+        --noise:            rgba(255, 190, 0, 0.035);
+
+        --stop:             rgba(255, 200, 0, 0.65);
+        --stop-border:      rgba(255, 200, 0, 0.38);
+
+        --screen-divider:   rgba(255, 200, 0, 0.3);
+        --lore:             rgba(255, 205, 50, 0.85);
+        --placeholder:      rgba(210, 165, 0, 0.4);
+        --placeholder-border: rgba(210, 165, 0, 0.3);
+
+        /* Galaxy-specific region tints (restrained) */
+        --region:           rgba(255, 215, 130, 0.55);
+        --region-glow:      rgba(255, 200, 80, 0.45);
+        --sanctus:          #ffce5a;
+        --sanctus-glow:     rgba(255, 200, 60, 0.5);
+        --nihilus:          #d2546a;
+        --nihilus-glow:     rgba(210, 70, 90, 0.5);
+      }
+
+      /* ── Non-clickable cartographic labels (segmentums / halves) ── */
+      .region-label {
+        position: absolute; top: 0; left: 0;
+        color: var(--region);
+        font-size: clamp(7px, 1.25vw, 10px);
+        letter-spacing: 5px;
+        text-shadow: 0 0 8px var(--region-glow);
+        white-space: nowrap;
+        opacity: .5;
+        visibility: hidden;
+        will-change: transform;
+        pointer-events: none;
+      }
+      .imperium-label {
+        position: absolute; top: 0; left: 0;
+        font-size: clamp(10px, 2.1vw, 16px);
+        letter-spacing: 9px;
+        white-space: nowrap;
+        opacity: .26;
+        visibility: hidden;
+        will-change: transform;
+        pointer-events: none;
+        font-weight: bold;
+      }
+      .imp-sanctus { color: var(--sanctus); text-shadow: 0 0 16px var(--sanctus-glow); }
+      .imp-nihilus { color: var(--nihilus); text-shadow: 0 0 16px var(--nihilus-glow); }
+
+      /* ── Xenos threat beacons (muted) ── */
+      .threat-label        { color: #a6cf6a !important; text-shadow: 0 0 7px rgba(150,190,90,.7) !important; }
+      .threat-label::before{ background: #a6cf6a !important; box-shadow: 0 0 6px #a6cf6a, 0 0 12px rgba(150,190,90,.5) !important; }
+
+      /* ── Rift / heretical beacons (Chaos crimson) ── */
+      .warp-label        { color: #ff5a48 !important; text-shadow: 0 0 8px rgba(255,70,50,.75) !important; }
+      .warp-label::before{ background: #ff3a2a !important; box-shadow: 0 0 6px #ff5a48, 0 0 12px rgba(255,70,50,.6) !important; }
+
+      /* ── Detail-panel auspex pict-capture (per-location generated image) ── */
+      /* ID + !important beats holo.css's global `canvas { position:fixed;
+         width:100% !important }` (which is meant for the WebGL surface). */
+      #screen-img {
+        position: static !important;
+        top: auto !important; left: auto !important;
+        width: 150px !important; height: 150px !important;
+        border: 1px solid var(--accent-soft);
+        box-shadow: 0 0 18px var(--accent-glow), inset 0 0 12px rgba(0,0,0,.6);
+        background: #000;
+        display: block;
+        flex-shrink: 0;
+      }
+
+      /* ── HOLOGRAM PROJECTION FX (scanlines / flicker / vignette) ──
+         These overlay the canvas but sit BELOW the labels & HUD (z 6 < 10)
+         so text stays crisp. This is what reads "projected light" rather
+         than "solid prop". */
+      #holo-fx { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
+      #holo-scanlines {
+        position: absolute; inset: 0;
+        background-image: repeating-linear-gradient(
+          to bottom,
+          rgba(0,0,0,0)    0px,
+          rgba(0,0,0,0)    2px,
+          rgba(0,0,0,0.22) 3px,
+          rgba(0,0,0,0)    4px
+        );
+        background-size: 100% 4px;
+        animation: holoScroll 6s linear infinite;
+        opacity: .5;
+      }
+      @keyframes holoScroll { from { background-position: 0 0; } to { background-position: 0 24px; } }
+      #holo-flicker {
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse at center, rgba(255,205,90,0.05), rgba(255,205,90,0) 68%);
+        animation: holoFlicker 2.6s ease-in-out infinite;
+      }
+      @keyframes holoFlicker {
+        0%, 100% { opacity: .55; }
+        46% { opacity: .85; } 47% { opacity: .35; } 49% { opacity: .8; }
+        73% { opacity: .6; }  74% { opacity: .9; }
+      }
+      #holo-vignette { position: absolute; inset: 0; box-shadow: inset 0 0 190px 55px rgba(0,0,0,0.55); }
+
+      @media (prefers-reduced-motion: reduce) {
+        #holo-scanlines, #holo-flicker { animation: none !important; }
+      }
+    </style>
+
+    <script src="three.min.js"></script>
+  </head>
+  <body>
+    <!-- ============================================================
+         HUD CHROME — same DOM ids as holo-core so holo.css applies.
+         (Renders a galaxy, not a planet, so it carries its own engine.)
+         ============================================================ -->
+    <div id="launch-ui">
+      <div id="launch-brand">✠   ADEPTUS TERRA — ASTRA CARTOGRAPHICA   ✠</div>
+      <button id="btn-launch" type="button" aria-label="Initiate galactic projection">⬡ INITIATE GALACTIC PROJECTION</button>
+    </div>
+
+    <button id="btn-stop" type="button" aria-label="Sever astro-link">■ SEVER ASTRO-LINK</button>
+
+    <div id="loading">
+      <div id="loading-text">[ ACCESSING ASTRA CARTOGRAPHICA ]</div>
+      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+    </div>
+
+    <div id="hud-top">
+      <div id="title">[ GALACTIC SURVEY : THE IMPERIUM ]</div>
+      <div id="subtitle">ASTRA CARTOGRAPHICA — M42 — THE NOCTIS AETERNA — REF: 000–MILKY–WAY</div>
+    </div>
+
+    <div id="hud-sigil">✠</div>
+
+    <div id="hud-corners">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+    </div>
+
+    <div id="scan-bar"></div>
+
+    <div id="holo-fx">
+      <div id="holo-scanlines"></div>
+      <div id="holo-flicker"></div>
+      <div id="holo-vignette"></div>
+    </div>
+
+    <div id="startup-overlay">
+      <div id="startup-noise"></div>
+      <div id="startup-beam"></div>
+      <div id="startup-sweep"></div>
+      <div id="startup-point"></div>
+    </div>
+
+    <div id="labels"></div>
+
+    <div id="hud-bottom">
+      <div id="hud-info">
+        CLASS: GALAXY — TYPE SBc BARRED SPIRAL<br/>
+        SECTORS: SEGMENTA QUINQUE<br/>
+        CICATRIX MALEDICTUM: ACTIVE<br/>
+        IMPERIUM NIHILUS: ASTRO-SIGNAL LOST
+      </div>
+      <div id="astro-status">
+        ✦ ASTRONOMICAN BLAZING<br/>
+        RANGE: IMPERIUM SANCTUS ONLY
+      </div>
+    </div>
+
+    <div id="loc-screen" role="dialog" aria-modal="true" aria-labelledby="screen-title">
+      <div id="loc-screen-head">
+        <span id="screen-title"></span>
+        <button id="screen-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="loc-screen-body">
+        <canvas id="screen-img" width="320" height="320"></canvas>
+        <div id="screen-lore"></div>
+        <span id="screen-placeholder">✦ AUSPEX PICT-CAPTURE :: RESONANCE STABLE</span>
+      </div>
+    </div>
+
+    <div id="webgl-fallback">
+      <div>
+        <div>[ COGITATOR LINK FAILURE ]</div>
+        <div style="margin-top:16px;opacity:.7">WebGL not available on this device.</div>
+      </div>
+    </div>
+
+    <script>
+    (function () {
+      "use strict";
+
+      // ───────────────────────── constants ─────────────────────────
+      const STARTUP_DUR = 3.2;
+      const COLLAPSE_DUR = 1.4;
+      const R = 34;            // galaxy disk radius (world units)
+
+      // The Great Rift in TEXTURE space (p = uv*2-1, p.x≈x/R, p.y≈-z/R).
+      // Nihilus (cut off, dark) is the s>0 half — galactic north (z<0).
+      const RIFT_SLOPE = 0.28, RIFT_OFFSET = 0.176;
+      function riftSignedWorld(x, z) {
+        const px = x / R, py = -z / R;       // world → texture-p
+        return py - RIFT_SLOPE * px - RIFT_OFFSET;
+      }
+      function gauss() { return (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 2; }
+      function smooth(e0, e1, x) { let t = (x - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+      // procedural spiral density fallback (0..1) if the base image can't be read
+      function armDensityProc(px, pv) {
+        const rr = Math.hypot(px, pv);
+        if (rr < 0.02 || rr > 1.0) return 0;
+        const ang = Math.atan2(pv, px);
+        const spiralA = ang + 5.0 * Math.log(rr + 0.09);
+        const a2 = 0.5 + 0.5 * Math.cos(2 * spiralA);
+        const a4 = 0.5 + 0.5 * Math.cos(4 * spiralA + 1.3);
+        const arms = Math.pow(Math.max(a2, a4 * 0.62), 2.3);
+        return Math.min(1, arms * Math.exp(-rr * 2.2) + Math.exp(-rr * 7.0) * 1.2);
+      }
+
+      // ───────────────────────── WebGL / renderer ─────────────────────────
+      const loadingEl  = document.getElementById("loading");
+      const launchUi   = document.getElementById("launch-ui");
+      const fallbackEl = document.getElementById("webgl-fallback");
+
+      let renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      } catch (e) {
+        loadingEl.style.display = "none";
+        launchUi.style.display = "none";
+        fallbackEl.style.display = "flex";
+        return;
+      }
+
+      const scene  = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 4000);
+      camera.position.z = 96;
+
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+      const canvas = renderer.domElement;
+      canvas.style.touchAction = "none";
+      canvas.style.display = "block";
+      document.body.insertBefore(canvas, document.body.firstChild);
+
+      const loadingBar = document.getElementById("loading-bar");
+      const setProgress = (p) => { loadingBar.style.width = p + "%"; };
+      setProgress(12);
+
+      // ───────────────────────── soft round point sprite ─────────────────────────
+      function makeDotTexture(coreA, midA) {
+        const c = document.createElement("canvas");
+        c.width = c.height = 64;
+        const g = c.getContext("2d");
+        const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grd.addColorStop(0.0, "rgba(255,255,255," + (coreA != null ? coreA : 1) + ")");
+        grd.addColorStop(0.25, "rgba(255,255,255," + (midA != null ? midA : 0.55) + ")");
+        grd.addColorStop(1.0, "rgba(255,255,255,0)");
+        g.fillStyle = grd;
+        g.fillRect(0, 0, 64, 64);
+        return new THREE.CanvasTexture(c);
+      }
+      const glowTex = makeDotTexture(0.95, 0.3);
+
+      // star-flare sprite (soft core + thin cross rays) for the Astronomican
+      function makeFlareTexture() {
+        const c = document.createElement("canvas");
+        c.width = c.height = 128;
+        const g = c.getContext("2d");
+        const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grd.addColorStop(0.0, "rgba(255,255,255,1)");
+        grd.addColorStop(0.18, "rgba(255,240,200,0.85)");
+        grd.addColorStop(0.5, "rgba(255,210,120,0.18)");
+        grd.addColorStop(1.0, "rgba(255,200,100,0)");
+        g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+        // thin cross rays
+        g.globalCompositeOperation = "lighter";
+        const ray = g.createLinearGradient(0, 64, 128, 64);
+        ray.addColorStop(0, "rgba(255,230,160,0)");
+        ray.addColorStop(0.5, "rgba(255,240,200,0.9)");
+        ray.addColorStop(1, "rgba(255,230,160,0)");
+        g.fillStyle = ray;
+        g.fillRect(0, 62.5, 128, 3);
+        g.save(); g.translate(64, 64); g.rotate(Math.PI / 2); g.translate(-64, -64);
+        g.fillRect(0, 62.5, 128, 3); g.restore();
+        return new THREE.CanvasTexture(c);
+      }
+
+      // ───────────────────────── distant backdrop starfield ─────────────────────────
+      (function addBackdrop() {
+        const N = 2400;
+        const geo = new THREE.BufferGeometry();
+        const pos = new Float32Array(N * 3);
+        const col = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+          const r = 950 + Math.random() * 550;
+          const th = Math.random() * Math.PI * 2;
+          const ph = Math.acos(2 * Math.random() - 1);
+          pos[i * 3]     = r * Math.sin(ph) * Math.cos(th);
+          pos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
+          pos[i * 3 + 2] = r * Math.cos(ph);
+          const w = Math.random() * 0.3;
+          col[i * 3] = 0.68 + w; col[i * 3 + 1] = 0.68 + w * 0.5; col[i * 3 + 2] = 0.7;
+        }
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute("color",    new THREE.BufferAttribute(col, 3));
+        scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+          size: 1.0, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.65
+        })));
+      })();
+
+      setProgress(28);
+
+      // The galaxy + everything that tilts/spins/scales.
+      const galaxyGroup = new THREE.Group();
+      scene.add(galaxyGroup);
+      galaxyGroup.scale.setScalar(0);
+
+      // ═══════════════════════════════════════════════════════════════
+      // GALAXY TEXTURE BAKE
+      // Same technique as Baal/Terra: render a shader into a texture, then
+      // map that texture onto geometry. Produces a continuous luminous
+      // spiral (gas, dust lanes, gold core, baked starfield, the Great Rift
+      // and the dimmed Nihilus half) — NOT scattered points.
+      //
+      // If holo/textures/galaxy_base.jpg exists it is used as the base
+      // sample (like the planets); otherwise the bake is fully procedural.
+      // ═══════════════════════════════════════════════════════════════
+      function loadImageTex(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            const t = new THREE.Texture(img);
+            t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+            t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+            t.needsUpdate = true; resolve(t);
+          };
+          img.onerror = () => reject(new Error("no base"));
+          img.src = src;
+        });
+      }
+
+      // Read the base image's pixels (same-origin → not tainted) so we can
+      // distribute 3D stars by its brightness. Resolves null on any failure.
+      function loadImageData(src, size) {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            try {
+              const c = document.createElement("canvas");
+              c.width = c.height = size;
+              const g = c.getContext("2d");
+              g.drawImage(img, 0, 0, size, size);
+              resolve(g.getImageData(0, 0, size, size));
+            } catch (_) { resolve(null); }
+          };
+          img.onerror = () => resolve(null);
+          img.src = src;
+        });
+      }
+
+      async function bakeGalaxyTexture() {
+        let baseTex = null;
+        try { baseTex = await loadImageTex("holo/textures/galaxy_base.jpg"); } catch (_) {}
+        const placeholder = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+        placeholder.needsUpdate = true;
+
+        const SZ = 2048;
+        const bs = new THREE.Scene();
+        const bc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const mat = new THREE.ShaderMaterial({
+          uniforms: {
+            baseMap: { value: baseTex || placeholder },
+            uBase:   { value: baseTex ? 1.0 : 0.0 }
+          },
+          vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }",
+          fragmentShader: `
+            precision highp float;
+            uniform sampler2D baseMap;
+            uniform float uBase;
+            varying vec2 vUv;
+
+            float hash21(vec2 p){ p=fract(p*vec2(127.319,311.874)); p+=dot(p,p+38.45); return fract(p.x*p.y); }
+            float sn(vec2 p){ vec2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+              return mix(mix(hash21(i),hash21(i+vec2(1,0)),u.x), mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),u.x),u.y); }
+            float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<6;i++){ v+=a*sn(p); a*=0.5; p=p*2.03+vec2(1.7,9.2);} return v; }
+
+            void main(){
+              vec2 uv = vUv;
+              vec2 p  = uv*2.0 - 1.0;          // [-1,1]
+              float r = length(p);
+              float ang = atan(p.y, p.x);
+
+              // ---- procedural barred-spiral gas ----
+              vec2 warp = vec2(fbm(p*2.0+1.3), fbm(p*2.0+7.7));
+              float spiralA = ang + 5.0*log(r+0.09);              // logarithmic winding
+              float a2 = 0.5+0.5*cos(2.0*spiralA);                // 2 grand-design arms
+              float a4 = 0.5+0.5*cos(4.0*spiralA+1.3);            // + minor arms
+              float arms = pow(max(a2, a4*0.62), 2.3);
+              float n = fbm(p*3.2 + warp*1.7);
+              float density = arms*(0.5 + 0.9*n);
+
+              float disk = exp(-r*2.2);                           // overall falloff
+              float core = exp(-r*8.5)*1.7;                       // bright bulge
+              float bar  = exp(-pow(p.y*5.5,2.0) - pow(p.x*1.7,2.0))*0.8; // central bar
+              density = density*disk + core + bar;
+
+              // dust lanes (dark filaments threading the arms)
+              float dust = smoothstep(0.45,0.78, fbm(p*6.5 + warp*0.8));
+              density *= mix(1.0, 0.38, dust*smoothstep(0.04,0.45,r));
+
+              // colour ramp: warm white core → imperial gold mid → cool faint rim
+              vec3 cCore = vec3(1.00,0.95,0.78);
+              vec3 cMid  = vec3(1.00,0.72,0.30);
+              vec3 cOut  = vec3(0.42,0.50,0.82);
+              vec3 col = mix(cMid, cCore, smoothstep(0.0,0.16, core+bar));
+              col = mix(col, cOut, smoothstep(0.40,0.95,r)*0.5);
+              col *= density;
+
+              // baked star sparkle
+              float st = step(0.9968, hash21(floor(uv*1500.0)));
+              col += vec3(1.0,0.96,0.86)*st*(0.4+0.6*hash21(uv*53.0));
+
+              vec3 proc = col;
+
+              // ---- base-photo path ----
+              // Use the NASA galaxy only for STRUCTURE (its luminance = where the
+              // arms, dust and core are), then recolour into a clean, BRIGHT
+              // imperial-gold hologram. Mixing the photo's raw blue-grey with a
+              // gold tint produced muddy brown — recolouring by luminance avoids it.
+              vec3 b   = texture2D(baseMap, uv).rgb;
+              float lum = pow(dot(b, vec3(0.299, 0.587, 0.114)), 0.82);  // structure
+              vec3 ramp = mix(cMid, cCore, smoothstep(0.32, 0.95, lum)); // gold→warm-white
+              ramp = mix(ramp, vec3(0.78, 0.50, 0.22), smoothstep(0.45, 0.98, r) * 0.5);
+              vec3 bEnh = ramp * lum * 2.6;                              // brightness from photo
+
+              vec3 outc = mix(proc, bEnh, uBase);
+              float bright = dot(outc, vec3(0.299, 0.587, 0.114));       // pre-effect intensity
+
+              // soft circular edge guard (the photo is already black at corners)
+              float edge = 1.0 - smoothstep(0.95, 1.07, r);
+
+              // ---- Great Rift (Cicatrix Maledictum) ----
+              float s    = p.y - ${RIFT_SLOPE.toFixed(3)}*p.x - ${RIFT_OFFSET.toFixed(3)};
+              float aS   = abs(s);
+              float gash = smoothstep(0.0, 0.016, aS);
+              outc *= mix(0.10, 1.0, gash);                                   // dark scar
+              outc += vec3(0.42, 0.11, 0.50) * exp(-aS*42.0) * 0.55 * edge;   // muted violet glow
+              if (s > 0.0) { outc.r *= 0.95; outc.g *= 0.52; outc.b *= 0.48; outc *= 0.72; } // Nihilus
+
+              // gentle tonemap → bright core rolls off to warm-gold, not white
+              outc = vec3(1.0) - exp(-outc * 1.05);
+
+              float alpha = clamp(pow(bright, 0.78) * 1.55, 0.0, 1.0) * edge;
+              alpha *= mix(0.12, 1.0, gash);                                  // scar cuts a real gap
+
+              gl_FragColor = vec4(clamp(outc, 0.0, 1.0), alpha);
+            }
+          `
+        });
+        bs.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+        const rt = new THREE.WebGLRenderTarget(SZ, SZ, {
+          minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+          format: THREE.RGBAFormat, encoding: THREE.sRGBEncoding
+        });
+        renderer.setRenderTarget(rt);
+        renderer.render(bs, bc);
+        renderer.setRenderTarget(null);
+        mat.dispose();
+        if (baseTex) baseTex.dispose();
+        placeholder.dispose();
+        rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        rt.texture.userData = { renderTarget: rt };
+        return { tex: rt.texture, usedBase: !!baseTex };
+      }
+
+      // (The baked photo already supplies the luminous core, dust lanes and
+      //  star detail, so no point-cloud / core-blob overlays are added — those
+      //  read as artificial. Depth comes from the tilt, spin and glow layers.)
+
+      setProgress(45);
+
+      // ───────────────────────── Astronomican beacon at Terra ─────────────────────────
+      const TERRA = { x: 7, z: 6 };
+      const astro = {};
+      (function buildAstronomican() {
+        // A blazing golden star-flare (the Emperor's psychic beacon), not a
+        // radar bullseye. A bright core flare + a soft aura, both gently pulse.
+        const core = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: makeFlareTexture(), color: 0xfff0c0, transparent: true,
+          opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending
+        }));
+        core.scale.setScalar(7);
+        core.position.set(TERRA.x, 0, TERRA.z);
+        galaxyGroup.add(core);
+
+        const aura = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: glowTex, color: 0xffcf6a, transparent: true,
+          opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending
+        }));
+        aura.scale.setScalar(13);
+        aura.position.set(TERRA.x, 0, TERRA.z);
+        galaxyGroup.add(aura);
+
+        astro.core = core; astro.aura = aura;
+      })();
+
+      // ───────────────────────── cartographic nodes ─────────────────────────
+      // kind: system | threat | warp | region | imperium
+      const NODES = [
+        { name: "SOL — HOLY TERRA", x: TERRA.x, z: TERRA.z, kind: "system",
+          desc: "THRONEWORLD OF MANKIND. ORIGIN OF THE ASTRONOMICAN. ALL GALACTIC DISTANCE IS MEASURED FROM THIS POINT. HEART OF IMPERIUM SANCTUS." },
+        { name: "MARS — FORGE WORLD", x: 7, z: 1.5, kind: "system",
+          desc: "SACRED FORGE-WORLD OF THE ADEPTUS MECHANICUS. PRINCIPAL ARMOURY OF THE IMPERIUM. RITES OF MAINTENANCE ETERNAL." },
+        { name: "BAAL — TEMPESTUS", x: 5, z: 17, kind: "system",
+          desc: "BLOOD ANGELS HOMEWORLD. ENDURED THE DEVOURER — HIVE FLEET LEVIATHAN. CROSS-REF: PLANETARY SURVEY 001-BAAL-PRIME." },
+        { name: "ULTRAMAR — MACRAGGE", x: 26, z: 5, kind: "system",
+          desc: "REALM OF THE ULTRAMARINES. FIVE HUNDRED WORLDS HELD IN ORDER. SEAT OF THE RESURRECTED PRIMARCH, ROBOUTE GUILLIMAN." },
+        { name: "ARMAGEDDON", x: 17, z: -4, kind: "system",
+          desc: "HIVE-WORLD OF UNENDING WAR. THRICE BESIEGED BY THE ORK WARLORD GHAZGHKULL THRAKA. MUNITORUM PRIORITY: ABSOLUTE." },
+        { name: "FENRIS", x: -7, z: -21, kind: "system",
+          desc: "DEATH-WORLD HOMEWORLD OF THE SPACE WOLVES. NOW A BASTION OF THE NORTHERN DARK BEYOND THE RIFT, IN IMPERIUM NIHILUS." },
+        { name: "CYPRA MUNDI", x: -3, z: -13, kind: "system",
+          desc: "SEGMENTUM OBSCURUS FORTRESS-COMMAND AND MECHANICUS DATA-VAULT. FORWARD BASTION ON THE NIHILUS FRONTIER." },
+        { name: "VIGILUS — NACHMUND", x: 13, z: 6, kind: "system",
+          desc: "THE SENTINEL WORLD. GUARDS THE NACHMUND GAUNTLET — A RARE STABLE PASSAGE THROUGH THE GREAT RIFT BETWEEN SANCTUS AND NIHILUS." },
+
+        { name: "CADIA † — THE EYE OF TERROR", x: -10, z: -16, kind: "warp",
+          desc: "CADIA STANDS NO LONGER. THE GATE IS BROKEN AND THE EYE BLEEDS UNCHECKED. FROM THIS WOUND THE GREAT RIFT WAS BORN." },
+        { name: "THE MAELSTROM", x: 11, z: 9, kind: "warp",
+          desc: "ANCIENT WARP STORM. LAIR OF RENEGADES, PIRATES AND THE RED CORSAIRS OF HURON BLACKHEART. SECOND ONLY TO THE EYE." },
+        { name: "CICATRIX MALEDICTUM", x: 7, z: -3, kind: "warp",
+          desc: "THE GREAT RIFT. A WARP WOUND SPANNING THE GALAXY, SUNDERING THE IMPERIUM IN TWAIN. BEYOND IT LIES THE NOCTIS AETERNA — THE BLACKNESS." },
+
+        { name: "OCTARIUS", x: 28, z: -8, kind: "threat",
+          desc: "WARZONE OCTARIUS. AN ORK EMPIRE AND HIVE FLEET LEVIATHAN LOCKED IN MUTUAL ANNIHILATION. CONTAINMENT HAS FAILED." },
+        { name: "EASTERN FRINGE — TYRANNIC APPROACH", x: 32, z: -1, kind: "threat",
+          desc: "THE GALACTIC EDGE. HIVE FLEETS DESCEND FROM THE INTERGALACTIC VOID. ALL BIOMASS MARKED FOR CONSUMPTION. SHADOW IN THE WARP RISING." },
+
+        { name: "SEGMENTUM OBSCURUS", x: 0,   z: -28, kind: "region" },
+        { name: "SEGMENTUM ULTIMA",   x: 29,  z: 0,   kind: "region" },
+        { name: "SEGMENTUM TEMPESTUS",x: 0,   z: 28,  kind: "region" },
+        { name: "SEGMENTUM PACIFICUS",x: -29, z: 0,   kind: "region" },
+        { name: "SEGMENTUM SOLAR",    x: -6,  z: -3,  kind: "region" },
+
+        { name: "IMPERIUM SANCTUS", x: -16, z: 16,  kind: "imperium", side: "sanctus" },
+        { name: "IMPERIUM NIHILUS", x: -16, z: -24, kind: "imperium", side: "nihilus" }
+      ];
+
+      const labelsRoot = document.getElementById("labels");
+      const locScreen  = document.getElementById("loc-screen");
+      const _v = new THREE.Vector3();
+
+      // typewriter for the lore screen
+      let typewriterId = null, isPaused = false;
+      function stopTypewriter() { if (typewriterId != null) { clearInterval(typewriterId); typewriterId = null; } }
+      function runTypewriter(loreEl, placeholder, text) {
+        stopTypewriter();
+        let i = 0; const scrap = "X#01>";
+        typewriterId = setInterval(() => {
+          if (Math.random() > 0.95 && i < text.length - 1) {
+            loreEl.textContent = text.substring(0, i) + scrap[Math.floor(Math.random() * scrap.length)];
+          } else {
+            loreEl.textContent = text.substring(0, i + 1); i++;
+          }
+          if (i >= text.length) {
+            stopTypewriter();
+            setTimeout(() => { placeholder.style.display = "block"; placeholder.classList.add("glitching"); }, 400);
+          }
+        }, 30);
+      }
+      // ── per-location auspex pict-capture (procedural, themed by kind) ──
+      const SYS_TINT = {
+        "SOL — HOLY TERRA":     [255, 212, 90],
+        "MARS — FORGE WORLD":   [196, 82, 40],
+        "BAAL — TEMPESTUS":     [206, 32, 18],
+        "ULTRAMAR — MACRAGGE":  [70, 120, 182],
+        "ARMAGEDDON":           [182, 92, 46],
+        "FENRIS":               [168, 208, 232],
+        "CYPRA MUNDI":          [172, 150, 88],
+        "VIGILUS — NACHMUND":   [210, 170, 82]
+      };
+      function _rng(name) {
+        let s = 2166136261;
+        for (let i = 0; i < name.length; i++) { s ^= name.charCodeAt(i); s = Math.imul(s, 16777619); }
+        return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+      }
+      function drawPlanet(g, cx, cy, R0, c, rnd) {
+        const lx = cx - R0 * 0.35, ly = cy - R0 * 0.4;
+        const grd = g.createRadialGradient(lx, ly, R0 * 0.05, cx, cy, R0 * 1.08);
+        grd.addColorStop(0,    "rgb(" + Math.min(255, c[0]*1.4|0) + "," + Math.min(255, c[1]*1.4|0) + "," + Math.min(255, c[2]*1.4|0) + ")");
+        grd.addColorStop(0.55, "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")");
+        grd.addColorStop(1,    "rgb(" + (c[0]*0.12|0) + "," + (c[1]*0.12|0) + "," + (c[2]*0.12|0) + ")");
+        g.save();
+        g.beginPath(); g.arc(cx, cy, R0, 0, 7); g.clip();
+        g.fillStyle = grd; g.fillRect(cx - R0, cy - R0, R0 * 2, R0 * 2);
+        for (let i = 0; i < 80; i++) {                  // surface mottling
+          const a = rnd() * 7, rad = rnd() * R0;
+          const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad;
+          const s = R0 * (0.04 + rnd() * 0.16);
+          g.globalAlpha = 0.10 + rnd() * 0.12;
+          g.fillStyle = rnd() < 0.5 ? "#000" : "#fff";
+          g.beginPath(); g.ellipse(x, y, s, s * (0.5 + rnd() * 0.6), rnd() * 7, 0, 7); g.fill();
+        }
+        g.globalAlpha = 1;
+        const tg = g.createLinearGradient(cx - R0, cy, cx + R0 * 1.1, cy);   // night side
+        tg.addColorStop(0, "rgba(0,0,0,0)"); tg.addColorStop(0.6, "rgba(0,0,0,0.25)"); tg.addColorStop(1, "rgba(0,0,0,0.85)");
+        g.fillStyle = tg; g.fillRect(cx - R0, cy - R0, R0 * 2, R0 * 2);
+        g.restore();
+        g.beginPath(); g.arc(cx, cy, R0, 0, 7); g.lineWidth = 3;             // atmosphere rim
+        g.strokeStyle = "rgba(" + c[0] + "," + c[1] + "," + c[2] + ",0.55)";
+        g.shadowBlur = 20; g.shadowColor = "rgba(" + c[0] + "," + c[1] + "," + c[2] + ",0.9)";
+        g.stroke(); g.shadowBlur = 0;
+      }
+      function drawWarp(g, cx, cy, R0, rnd) {
+        const grd = g.createRadialGradient(cx, cy, 2, cx, cy, R0 * 1.15);
+        grd.addColorStop(0, "#000"); grd.addColorStop(0.35, "rgba(150,20,30,0.85)");
+        grd.addColorStop(0.7, "rgba(190,40,90,0.6)"); grd.addColorStop(1, "rgba(150,40,150,0)");
+        g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R0 * 1.15, 0, 7); g.fill();
+        g.save(); g.beginPath(); g.arc(cx, cy, R0 * 1.1, 0, 7); g.clip();
+        for (let i = 0; i < 26; i++) {                  // turbulent warp arcs
+          const rad = R0 * (0.15 + 0.95 * i / 26), a0 = rnd() * 7, sweep = 1.5 + rnd() * 3.0;
+          g.beginPath(); g.arc(cx, cy, rad, a0, a0 + sweep);
+          g.lineWidth = 1 + rnd() * 2;
+          g.strokeStyle = "rgba(" + (200 + rnd()*55|0) + "," + (40 + rnd()*60|0) + "," + (90 + rnd()*120|0) + "," + (0.12 + rnd()*0.18) + ")";
+          g.stroke();
+        }
+        g.restore();
+        const eg = g.createRadialGradient(cx, cy, 0, cx, cy, R0 * 0.3);      // searing eye
+        eg.addColorStop(0, "rgba(255,240,220,0.95)"); eg.addColorStop(0.5, "rgba(255,120,90,0.5)"); eg.addColorStop(1, "rgba(255,80,80,0)");
+        g.fillStyle = eg; g.beginPath(); g.arc(cx, cy, R0 * 0.3, 0, 7); g.fill();
+      }
+      function drawThreat(g, cx, cy, R0, rnd) {
+        const grd = g.createRadialGradient(cx - R0*0.3, cy - R0*0.3, R0*0.1, cx, cy, R0*1.05);
+        grd.addColorStop(0, "rgba(60,80,40,1)"); grd.addColorStop(0.6, "rgba(28,40,20,1)"); grd.addColorStop(1, "rgba(5,8,4,1)");
+        g.save(); g.beginPath(); g.arc(cx, cy, R0, 0, 7); g.clip();
+        g.fillStyle = grd; g.fillRect(cx - R0, cy - R0, R0 * 2, R0 * 2);
+        g.restore();
+        for (let i = 0; i < 160; i++) {                 // converging bio-swarm
+          const a = rnd() * 7, rad = R0 * (0.6 + rnd() * 1.4);
+          const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad, s = 0.6 + rnd() * 1.8;
+          g.globalAlpha = 0.5 + rnd() * 0.5;
+          g.fillStyle = "rgba(" + (120 + rnd()*70|0) + ",255," + (90 + rnd()*60|0) + ",1)";
+          g.beginPath(); g.arc(x, y, s, 0, 7); g.fill();
+        }
+        g.globalAlpha = 1;
+        g.beginPath(); g.arc(cx, cy, R0, 0, 7); g.lineWidth = 3;
+        g.strokeStyle = "rgba(150,220,90,0.5)"; g.shadowBlur = 18; g.shadowColor = "rgba(120,220,90,0.7)";
+        g.stroke(); g.shadowBlur = 0;
+      }
+      function drawAuspexFrame(g, W, H, cx, cy, R0) {
+        g.globalAlpha = 0.10; g.fillStyle = "#ffd24a";  // scanlines
+        for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+        g.globalAlpha = 1;
+        g.strokeStyle = "rgba(255,210,90,0.40)"; g.lineWidth = 1;  // reticle
+        g.beginPath(); g.arc(cx, cy, R0 * 1.22, 0, 7); g.stroke();
+        for (let k = 0; k < 4; k++) {
+          const a = k * Math.PI / 2;
+          g.beginPath();
+          g.moveTo(cx + Math.cos(a)*R0*1.22, cy + Math.sin(a)*R0*1.22);
+          g.lineTo(cx + Math.cos(a)*R0*1.34, cy + Math.sin(a)*R0*1.34);
+          g.stroke();
+        }
+        g.strokeStyle = "rgba(255,210,90,0.6)"; g.lineWidth = 2;  // corner brackets
+        const m = 14, L = 22;
+        [[m, m, 1, 1], [W-m, m, -1, 1], [m, H-m, 1, -1], [W-m, H-m, -1, -1]].forEach((cn) => {
+          g.beginPath(); g.moveTo(cn[0], cn[1] + cn[3]*L); g.lineTo(cn[0], cn[1]); g.lineTo(cn[0] + cn[2]*L, cn[1]); g.stroke();
+        });
+        g.fillStyle = "rgba(255,210,90,0.85)"; g.font = "14px 'Courier New', monospace"; g.textAlign = "center";
+        g.fillText("AUSPEX SCAN", cx, H - 16);
+      }
+      // Draw to an OFFSCREEN canvas, then show it as an <img>. (A live <canvas>
+      // in the DOM gets hijacked by holo.css's global `canvas { position:fixed;
+      // width:100% !important }` rule meant for the WebGL surface.)
+      // Real public-domain pict-captures (NASA / Hubble), thematically matched.
+      const LOC_SRC = {
+        "SOL — HOLY TERRA":                   "holo/textures/terra_base.jpg",   // Earth at night
+        "MARS — FORGE WORLD":                 "holo/textures/loc/mars.jpg",     // Mars (Hubble)
+        "BAAL — TEMPESTUS":                   "holo/textures/baal_base.jpg",    // red world base
+        "ULTRAMAR — MACRAGGE":                "holo/textures/loc/ultramar.jpg", // Neptune
+        "ARMAGEDDON":                         "holo/textures/loc/armageddon.jpg", // Io (volcanic)
+        "FENRIS":                             "holo/textures/loc/fenris.jpg",   // Europa (ice)
+        "CYPRA MUNDI":                        "holo/textures/loc/cypra.jpg",    // Mercury
+        "VIGILUS — NACHMUND":                 "holo/textures/loc/vigilus.jpg",  // Titan
+        "CADIA † — THE EYE OF TERROR":        "holo/textures/loc/cadia.jpg",    // Helix Nebula
+        "THE MAELSTROM":                      "holo/textures/loc/maelstrom.jpg",// Whirlpool Galaxy
+        "CICATRIX MALEDICTUM":                "holo/textures/loc/cicatrix.jpg", // Carina Nebula
+        "OCTARIUS":                           "holo/textures/loc/octarius.jpg", // Cat's Eye Nebula
+        "EASTERN FRINGE — TYRANNIC APPROACH": "holo/textures/loc/eastern.jpg"   // Hubble Deep Field
+      };
+      const LOC_IMG = {};
+      for (const k in LOC_SRC) { const im = new Image(); im.src = LOC_SRC[k]; LOC_IMG[k] = im; }
+
+      // Draw straight into the visible canvas — no toDataURL/getImageData, so a
+      // cross-origin/tainted canvas can never break it (we only ever display).
+      function drawLocThumb(node) {
+        const cv = document.getElementById("screen-img");
+        const g = cv.getContext("2d");
+        const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2, R0 = W * 0.32;
+        const rnd = _rng(node.name);
+        g.clearRect(0, 0, W, H); g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+
+        const im = LOC_IMG[node.name];
+        if (im && im.complete && im.naturalWidth) {
+          // real photo, cover-fit + scope vignette
+          const s = Math.max(W / im.naturalWidth, H / im.naturalHeight);
+          const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+          g.drawImage(im, cx - dw / 2, cy - dh / 2, dw, dh);
+          const vg = g.createRadialGradient(cx, cy, R0 * 0.7, cx, cy, W * 0.72);
+          vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+          g.fillStyle = vg; g.fillRect(0, 0, W, H);
+        } else {
+          // procedural fallback if the image hasn't loaded / is missing
+          if (node.kind === "warp")        drawWarp(g, cx, cy, R0, rnd);
+          else if (node.kind === "threat") drawThreat(g, cx, cy, R0, rnd);
+          else                             drawPlanet(g, cx, cy, R0, SYS_TINT[node.name] || [255, 210, 90], rnd);
+        }
+        drawAuspexFrame(g, W, H, cx, cy, R0);
+      }
+
+      function openScreen(node) {
+        isPaused = true;
+        locScreen.classList.add("glitching");
+        setTimeout(() => locScreen.classList.remove("glitching"), 300);
+        document.getElementById("screen-title").textContent = "[ " + node.name + " ]";
+        const loreEl = document.getElementById("screen-lore");
+        const placeholder = document.getElementById("screen-placeholder");
+        loreEl.textContent = "";
+        placeholder.style.display = "none";
+        placeholder.classList.remove("glitching");
+        try { drawLocThumb(node); } catch (_) {}
+        const img = document.getElementById("screen-img");
+        img.classList.add("glitching");
+        setTimeout(() => img.classList.remove("glitching"), 300);
+        locScreen.style.display = "block";
+        runTypewriter(loreEl, placeholder, node.desc);
+      }
+      function closeScreen() { stopTypewriter(); isPaused = false; locScreen.style.display = "none"; }
+      document.getElementById("screen-close").addEventListener("click", closeScreen);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && locScreen.style.display === "block") closeScreen();
+      });
+
+      const labelObjs = NODES.map((n) => {
+        let cls = "label", center = false;
+        if (n.kind === "region")        { cls = "region-label"; center = true; }
+        else if (n.kind === "imperium") { cls = "imperium-label " + (n.side === "nihilus" ? "imp-nihilus" : "imp-sanctus"); center = true; }
+        else if (n.kind === "threat")   { cls = "label threat-label"; }
+        else if (n.kind === "warp")     { cls = "label warp-label"; }
+
+        const div = document.createElement("div");
+        div.className = cls;
+        div.textContent = n.name;
+        if (n.kind === "system" || n.kind === "threat" || n.kind === "warp") {
+          div.style.pointerEvents = "all";
+          div.style.cursor = "pointer";
+          div.setAttribute("role", "button");
+          div.setAttribute("tabindex", "0");
+          div.setAttribute("aria-label", "Open survey datum for " + n.name);
+          const open = () => openScreen(n);
+          div.addEventListener("click", open);
+          div.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+
+          const col = n.kind === "threat" ? 0xa6cf6a : n.kind === "warp" ? 0xff5a48 : 0xffd24a;
+          const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: glowTex, color: col, transparent: true, opacity: 0.85,
+            depthWrite: false, blending: THREE.AdditiveBlending
+          }));
+          marker.scale.setScalar(1.3);
+          marker.position.set(n.x, 0, n.z);
+          galaxyGroup.add(marker);
+        }
+        labelsRoot.appendChild(div);
+        return { el: div, local: new THREE.Vector3(n.x, 0, n.z), center };
+      });
+
+      function updateLabels() {
+        galaxyGroup.updateMatrixWorld();
+        const visibleByScale = galaxyGroup.scale.x >= 0.1;
+        const w = innerWidth, h = innerHeight;
+        for (const p of labelObjs) {
+          if (!visibleByScale) { if (p.el.style.visibility !== "hidden") p.el.style.visibility = "hidden"; continue; }
+          _v.copy(p.local).applyMatrix4(galaxyGroup.matrixWorld).project(camera);
+          if (_v.z > 1) { p.el.style.visibility = "hidden"; continue; }
+          p.el.style.visibility = "visible";
+          const sx = (_v.x * 0.5 + 0.5) * w;
+          const sy = -(_v.y * 0.5 - 0.5) * h;
+          p.el.style.transform = p.center
+            ? "translate(" + sx + "px," + sy + "px) translate(-50%,-50%)"
+            : "translate(" + sx + "px," + sy + "px)";
+        }
+      }
+
+      // ───────────────────────── audio ─────────────────────────
+      const sndSlots = {};
+      const sndPaths = { up: "sounds/holo_up.mp3", down: "sounds/holo_down.mp3" };
+      function playSound(key) {
+        let a = sndSlots[key];
+        if (!a) { try { a = new Audio(sndPaths[key]); a.volume = 0.7; sndSlots[key] = a; } catch (_) { return; } }
+        try { a.currentTime = 0; a.play().catch(() => {}); } catch (_) {}
+      }
+
+      // ───────────────────────── drag to rotate ─────────────────────────
+      let isDragging = false;
+      let rotY = 0, rotX = 0, targetRotY = 0, targetRotX = 0.98; // tilted to reveal the disc's depth
+      let lastX = 0, lastY = 0;
+      const autoSpeed = 0.045;
+
+      canvas.addEventListener("pointerdown", (e) => {
+        isDragging = true; lastX = e.clientX; lastY = e.clientY;
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!isDragging) return;
+        targetRotY += (e.clientX - lastX) * 0.006;
+        targetRotX += (e.clientY - lastY) * 0.006;
+        targetRotX = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, targetRotX));
+        lastX = e.clientX; lastY = e.clientY;
+      });
+      const release = (e) => { isDragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
+      canvas.addEventListener("pointerup", release);
+      canvas.addEventListener("pointercancel", release);
+      canvas.addEventListener("pointerleave", release);
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+      });
+
+      // ───────────────────────── launch / collapse / startup ─────────────────────────
+      const btnStop = document.getElementById("btn-stop");
+      const startupOverlay = document.getElementById("startup-overlay");
+      const hudSigil = document.getElementById("hud-sigil");
+
+      let holoActive = false, collapseAnim = false;
+      let startupPhase = 0, startupT = 0, collapseT = 0;
+      const activeTimeouts = [];
+      const pushTo = (ms, fn) => activeTimeouts.push(setTimeout(fn, ms));
+      const clearTimeoutsAll = () => activeTimeouts.splice(0).forEach(clearTimeout);
+
+      const HUD_IDS = ["hud-top", "hud-corners", "scan-bar", "labels", "hud-bottom", "startup-overlay", "hud-sigil"];
+
+      function launchHolo() {
+        if (holoActive) return;
+        holoActive = true;
+        playSound("up");
+        launchUi.style.transition = "opacity 0.4s";
+        launchUi.style.opacity = "0";
+        setTimeout(() => { launchUi.style.display = "none"; }, 400);
+        HUD_IDS.forEach((id) => {
+          const e = document.getElementById(id);
+          if (!e) return;
+          e.style.transition = "opacity 0.01s";
+          e.style.opacity = "1";
+          if (id === "labels" || id === "hud-bottom") e.style.pointerEvents = "";
+        });
+        pushTo(STARTUP_DUR * 1000, () => { btnStop.style.display = "block"; });
+        triggerStartup();
+      }
+
+      function collapseHolo() {
+        if (!holoActive || collapseAnim) return;
+        collapseAnim = true; collapseT = 0;
+        playSound("down");
+        clearTimeoutsAll();
+        HUD_IDS.filter((id) => id !== "startup-overlay").forEach((id) => {
+          const e = document.getElementById(id);
+          if (!e) return;
+          e.style.transition = "opacity 0.5s";
+          e.style.opacity = "0";
+          e.style.pointerEvents = "none";
+        });
+        startupOverlay.style.display = "none";
+        const sweep = document.getElementById("startup-sweep");
+        sweep.style.transition = "none"; sweep.style.bottom = "-60%";
+        btnStop.style.display = "none";
+      }
+
+      function triggerStartup() {
+        startupPhase = 1; startupT = 0;
+        startupOverlay.style.display = "block";
+        const point = document.getElementById("startup-point");
+        const beam  = document.getElementById("startup-beam");
+        const noise = document.getElementById("startup-noise");
+        const sweep = document.getElementById("startup-sweep");
+        const hud   = document.getElementById("hud-top");
+        const info  = document.getElementById("hud-bottom");
+
+        hud.style.opacity = "0"; info.style.opacity = "0"; hudSigil.style.opacity = "0";
+        hud.style.transition = "opacity 0.6s ease";
+        info.style.transition = "opacity 0.8s ease";
+        hudSigil.style.transition = "opacity 1.1s ease";
+        point.style.transition = "opacity 0.08s ease"; point.style.opacity = "1";
+
+        pushTo(100, () => {
+          beam.style.transition = "opacity 0.2s ease"; noise.style.transition = "opacity 0.3s ease";
+          beam.style.opacity = "0.9"; noise.style.opacity = "1";
+        });
+        pushTo(300, () => { sweep.style.transition = "bottom 2.4s cubic-bezier(0.16,1,0.3,1)"; sweep.style.bottom = "100%"; });
+        pushTo(1000, () => {
+          point.style.transition = "opacity 0.5s ease"; beam.style.transition = "opacity 0.5s ease";
+          point.style.opacity = "0"; beam.style.opacity = "0";
+        });
+        pushTo(2200, () => {
+          noise.style.transition = "opacity 1.0s ease"; noise.style.opacity = "0";
+          hud.style.opacity = "1"; info.style.opacity = "1"; hudSigil.style.opacity = "1";
+        });
+        pushTo(STARTUP_DUR * 1000, () => {
+          startupPhase = 2; startupOverlay.style.display = "none";
+          sweep.style.transition = "none"; sweep.style.bottom = "-60%";
+        });
+      }
+
+      document.getElementById("btn-launch").addEventListener("click", launchHolo);
+      btnStop.addEventListener("click", collapseHolo);
+
+      // ───────────────────────── animation loop ─────────────────────────
+      let time = 0, lastFrame = 0;
+      const BEACON_PERIOD = 5.2;
+
+      function frame(now) {
+        requestAnimationFrame(frame);
+        const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0.016;
+        lastFrame = now;
+        time += dt;
+
+        if (startupPhase === 1) {
+          startupT += dt;
+          const t = Math.min(startupT / STARTUP_DUR, 1.0);
+          const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          const flicker = startupT < 0.6 ? 0.5 + Math.random() * 0.5 : 1.0;
+          galaxyGroup.scale.setScalar(ease * flicker);
+        }
+        if (collapseAnim) {
+          collapseT += dt;
+          const t = Math.min(collapseT / COLLAPSE_DUR, 1.0);
+          const ease = 1 - (1 - t) * (1 - t) * (1 - t);
+          const flicker = t > 0.75 ? (Math.random() > 0.15 ? 1.0 : 0.0) : 1.0;
+          galaxyGroup.scale.setScalar((1.0 - ease) * flicker);
+          if (t >= 1.0) {
+            collapseAnim = false; holoActive = false;
+            galaxyGroup.scale.setScalar(0);
+            startupPhase = 0; startupT = 0;
+            launchUi.style.display = "flex"; launchUi.style.opacity = "0";
+            setTimeout(() => { launchUi.style.transition = "opacity 0.6s"; launchUi.style.opacity = "1"; }, 50);
+          }
+        }
+
+        if (!isDragging && !isPaused && holoActive && !collapseAnim) targetRotY += autoSpeed * dt;
+        rotY += (targetRotY - rotY) * Math.min(1, 4.2 * dt);
+        rotX += (targetRotX - rotX) * Math.min(1, 4.2 * dt);
+        galaxyGroup.rotation.y = rotY;
+        galaxyGroup.rotation.x = rotX;
+
+        // Astronomican: gentle breathing of the beacon flare + aura
+        if (astro.core) {
+          const ap = 0.85 + Math.sin(time * 1.8) * 0.15;
+          astro.core.material.opacity = 0.9 * ap;
+          astro.core.scale.setScalar(7 * (0.95 + 0.07 * Math.sin(time * 1.8)));
+          astro.aura.material.opacity = 0.3 * ap;
+        }
+
+        updateLabels();
+        renderer.render(scene, camera);
+      }
+
+      // ───────────────────────── volumetric 3D star layer ─────────────────────────
+      // Stars distributed in true 3D, weighted by the base image's brightness:
+      // dense + tall through the bulge, thin out in the arms. This is what gives
+      // real depth/parallax on rotation — a flat textured disc alone is a prop.
+      function buildVolumetricStars(imgData) {
+        const N = 6000;
+        const pos = [], col = [];
+        const cMid = [1.0, 0.72, 0.30], cCore = [1.0, 0.95, 0.80];
+        const have = !!imgData, S = have ? imgData.width : 0, data = have ? imgData.data : null;
+        let placed = 0, guard = 0;
+        while (placed < N && guard < N * 60) {
+          guard++;
+          const u = Math.random(), v = Math.random();
+          const px = u * 2 - 1, pv = v * 2 - 1;
+          const rr = Math.hypot(px, pv);
+          if (rr > 1.0) continue;
+          let lum;
+          if (have) {
+            const sx = Math.min(S - 1, (u * S) | 0);
+            const sy = Math.min(S - 1, ((1 - v) * S) | 0);   // flipY to match the texture
+            const idx = (sy * S + sx) * 4;
+            lum = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) / 255;
+          } else {
+            lum = armDensityProc(px, pv);
+          }
+          lum = Math.pow(Math.max(0, lum), 0.9);
+          if (Math.random() > lum * 1.35 + 0.008) continue;   // density follows brightness
+          const x = px * R, z = -pv * R;                      // align with the disc mapping
+          const thick = 0.8 + 4.5 * Math.exp(-rr * 5.5);      // bulge tall, arms flat
+          const y = gauss() * thick;
+          const t = smooth(0.32, 0.95, lum);
+          let cr = cMid[0] + (cCore[0] - cMid[0]) * t;
+          let cg = cMid[1] + (cCore[1] - cMid[1]) * t;
+          let cb = cMid[2] + (cCore[2] - cMid[2]) * t;
+          if (Math.random() < 0.14) { cr = 0.70; cg = 0.82; cb = 1.0; } // sparse cool stars
+          const b = (0.5 + Math.random() * 0.7) * lum * 1.7;
+          cr *= b; cg *= b; cb *= b;
+          if (riftSignedWorld(x, z) > 0) { cr *= 0.85; cg *= 0.5; cb *= 0.46; } // Nihilus dim
+          pos.push(x, y, z); col.push(cr, cg, cb); placed++;
+        }
+        // dense 3D core bulge — a squashed sphere of warm stars (real volume)
+        for (let i = 0; i < 1500; i++) {
+          const rad = Math.pow(Math.random(), 1.7) * 6.2;
+          const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+          const bx = rad * Math.sin(ph) * Math.cos(th);
+          const by = rad * Math.cos(ph) * 0.55;
+          const bz = rad * Math.sin(ph) * Math.sin(th);
+          const bb = 0.55 + Math.random() * 0.5;
+          pos.push(bx, by, bz); col.push(1.0 * bb, 0.9 * bb, 0.62 * bb);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+        geo.setAttribute("color",    new THREE.BufferAttribute(new Float32Array(col), 3));
+        galaxyGroup.add(new THREE.Points(geo, new THREE.PointsMaterial({
+          size: 0.32, map: glowTex, vertexColors: true, transparent: true,
+          opacity: 0.78, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+        })));
+      }
+
+      // ───────────────────────── boot ─────────────────────────
+      setProgress(60);
+      Promise.all([
+        bakeGalaxyTexture(),
+        loadImageData("holo/textures/galaxy_base.jpg", 256)
+      ]).then(([{ tex }, imgData]) => {
+        const planeGeo = new THREE.PlaneGeometry(2 * R, 2 * R);
+
+        // 1) main galaxy — alpha-composited and kept translucent so the
+        //    starfield and 3D stars show through it (projected light, not a disc)
+        const disk = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({
+          map: tex, transparent: true, opacity: 0.55, depthWrite: false,
+          blending: THREE.NormalBlending, side: THREE.DoubleSide
+        }));
+        disk.rotation.x = -Math.PI / 2;     // lie flat in the XZ plane
+        galaxyGroup.add(disk);
+
+        // 2) faint additive bloom (same texture) for the holographic glow
+        const bloom = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({
+          map: tex, transparent: true, opacity: 0.22, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+        }));
+        bloom.rotation.x = -Math.PI / 2;
+        bloom.position.y = 0.02;
+        galaxyGroup.add(bloom);
+
+        // 3) soft oversized outer halo
+        const halo = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({
+          map: tex, transparent: true, opacity: 0.09, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+        }));
+        halo.rotation.x = -Math.PI / 2;
+        halo.scale.set(1.18, 1.18, 1);
+        halo.position.y = -0.04;
+        galaxyGroup.add(halo);
+
+        // 4) faint holographic range-grid (concentric rings, co-planar with the
+        //    disk) — reads as a projected star-chart overlay
+        const gridMat = new THREE.LineBasicMaterial({
+          color: 0xffd24a, transparent: true, opacity: 0.07,
+          depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        [8, 15, 22, 29].forEach((rad) => {
+          const pts = [];
+          for (let i = 0; i <= 96; i++) {
+            const a = (i / 96) * Math.PI * 2;
+            pts.push(new THREE.Vector3(Math.cos(a) * rad, 0, Math.sin(a) * rad));
+          }
+          galaxyGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+        });
+
+        // 5) the volumetric 3D star layer (depth + bulge)
+        buildVolumetricStars(imgData);
+
+        setProgress(100);
+        setTimeout(() => { loadingEl.style.display = "none"; }, 300);
+        requestAnimationFrame(frame);
+      }).catch((err) => {
+        console.error("Galaxy bake failed:", err);
+        loadingEl.style.display = "none";
+        launchUi.style.display = "none";
+        fallbackEl.style.display = "flex";
+      });
+    })();
+    </script>
+  </body>
+</html>

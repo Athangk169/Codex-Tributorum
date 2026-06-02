@@ -15,5 +15,35 @@ baal_base.jpg
   License: NASA imagery is public domain. The threex.planets repo is
            distributed under the MIT license.
 
-Both images are used only as starting samples in a procedural bake shader;
-the planet surfaces rendered on screen are not the source images themselves.
+galaxy_base.jpg
+  Source : Milky_Way_2005.jpg via Wikimedia Commons
+           https://commons.wikimedia.org/wiki/File:Milky_Way_2005.jpg
+  Origin : NASA / JPL-Caltech / R. Hurt (SSC-Caltech) — top-down artist's
+           concept of the barred-spiral Milky Way (unannotated).
+  License: NASA/JPL-Caltech imagery is public domain.
+
+All three images are used only as starting samples in a procedural bake
+shader; the worlds/galaxy rendered on screen are not the source images
+themselves (they are re-tinted, lit, and overlaid with Imperial cartography).
+
+
+Location pict-captures (loc/*.jpg)
+==================================
+Public-domain astronomical imagery, downscaled and shown inside an "auspex
+scan" frame in the galaxy chart's location detail panel. Thematically matched
+to each Warhammer 40,000 location; not depictions of the fictional places.
+Sourced via Wikimedia Commons (Special:FilePath).
+
+  mars.jpg        Mars — NASA / Hubble (public domain)
+  ultramar.jpg    Neptune — NASA / Voyager 2 (public domain)
+  armageddon.jpg  Io — NASA / JPL / Galileo (public domain)
+  fenris.jpg      Europa — NASA / JPL (public domain)
+  cypra.jpg       Mercury — NASA / JHUAPL / MESSENGER (public domain)
+  vigilus.jpg     Titan — NASA / JPL / Cassini (public domain)
+  cadia.jpg       Helix Nebula (NGC 7293) — NASA / Hubble (public domain)
+  maelstrom.jpg   Whirlpool Galaxy (M51) — NASA / Hubble (public domain)
+  cicatrix.jpg    Carina Nebula — NASA / Hubble (public domain)
+  octarius.jpg    Cat's Eye Nebula (NGC 6543) — NASA / Hubble (public domain)
+  eastern.jpg     Hubble Ultra Deep Field — NASA / Hubble (public domain)
+
+Terra and Baal reuse terra_base.jpg / baal_base.jpg above.

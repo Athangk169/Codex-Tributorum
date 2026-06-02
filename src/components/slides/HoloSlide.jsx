@@ -423,20 +423,27 @@ const HoloSlide = ({ data, db, userId }) => {
             <div style={{ position: 'absolute', right: '-10px', top: '19px', height: '2px', width: '10px', background: 'rgba(204,34,0,0.4)' }} />
           </div>
 
-          <div style={{ position: 'absolute', top: '15px', left: '15px', zIndex: 11, display: 'flex', gap: '6px' }}>
+          <div style={{ position: 'absolute', top: '15px', left: '15px', zIndex: 11, display: 'flex', gap: '6px', flexWrap: 'wrap', maxWidth: 'calc(100% - 150px)' }}>
             <button 
               className="mech-btn" 
-              style={{ margin: 0, padding: '4px 10px', fontSize: '9px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'baal' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--border)' }} 
+              style={{ margin: 0, width: 'auto', padding: '4px 10px', fontSize: '9px', background: activeHolo === 'baal' ? 'rgba(204,34,0,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'baal' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'baal' ? 'var(--ba-crimson)' : 'var(--border)' }}
               onClick={() => setActiveHolo('baal')}
             >
               [ BAAL PRIME ]
             </button>
-            <button 
-              className="mech-btn" 
-              style={{ margin: 0, padding: '4px 10px', fontSize: '9px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'terra' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--border)' }} 
+            <button
+              className="mech-btn"
+              style={{ margin: 0, width: 'auto', padding: '4px 10px', fontSize: '9px', background: activeHolo === 'terra' ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'terra' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'terra' ? 'var(--ba-gold)' : 'var(--border)' }}
               onClick={() => setActiveHolo('terra')}
             >
               [ HOLY TERRA ]
+            </button>
+            <button
+              className="mech-btn"
+              style={{ margin: 0, width: 'auto', padding: '4px 10px', fontSize: '9px', background: activeHolo === 'galaxy' ? 'rgba(255,206,90,0.22)' : 'rgba(0,0,0,0.8)', color: activeHolo === 'galaxy' ? '#fff' : 'var(--text-d)', borderColor: activeHolo === 'galaxy' ? '#ffce5a' : 'var(--border)' }}
+              onClick={() => setActiveHolo('galaxy')}
+            >
+              [ THE IMPERIUM ]
             </button>
           </div>
 
@@ -460,7 +467,7 @@ const HoloSlide = ({ data, db, userId }) => {
           <div style={{ flex: 1, position: 'relative', background: '#000', overflow: 'hidden' }}>
             <iframe 
               title="Orbital Holo Survey" 
-              src={activeHolo === 'baal' ? "Baal_holo.html" : "Terra_holo.html"} 
+              src={activeHolo === 'baal' ? "Baal_holo.html" : activeHolo === 'terra' ? "Terra_holo.html" : "Galaxy_holo.html"}
               style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }} 
             />
             <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }} />

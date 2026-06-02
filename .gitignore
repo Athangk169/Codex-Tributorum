@@ -24,6 +24,10 @@ dist-ssr
 *.sw?
 .env
 
+# Python bytecode cache (auspex_daemon.py)
+__pycache__/
+*.pyc
+
 # Android release-signing secrets — never check these in.
 android/app/keystore.properties
 android/app/*.keystore

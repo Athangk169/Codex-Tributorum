@@ -111,7 +111,7 @@ src/
 
 public/
 ├── fonts/                 # Fira Code + Share Tech Mono (self-hosted)
-├── sounds/                # bgm, click, typing, holo SFX
+├── sounds/                # bgm, click, holo SFX
 ├── servo-skull_warhammer.glb   # overview 3D model
 ├── holo/                  # three.js scene assets (Terra/Baal holos)
 ├── three.min.js           # local copy — no CDN

@@ -65,6 +65,9 @@ const MobileHolo = ({ data, db, userId }) => {
 
   const [selectedRuleId, setSelectedRuleId] = useState('');
 
+  // Holo lens — which orbital scene the iframe renders
+  const [activeHolo, setActiveHolo] = useState('baal');
+
   // Sheet states
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddKeyword, setShowAddKeyword]   = useState(false);
@@ -239,6 +242,39 @@ const MobileHolo = ({ data, db, userId }) => {
         <div style={{ fontSize: '9px', color: '#4a2010', fontStyle: 'italic', letterSpacing: '1px' }}>
           <ScrambleText text={defaultLoreSnippets[loreIdx]} />
         </div>
+      </div>
+
+      {/* ── HOLOGRAM VIEWPORT ── */}
+      <div style={{ position: 'relative', height: 'min(42vh, 300px)', flexShrink: 0, background: '#000', borderBottom: '1px solid var(--ba-border)', overflow: 'hidden' }}>
+        {/* Orbital feed toggle */}
+        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 11, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {[
+            { id: 'baal',   label: 'BAAL',     color: 'var(--ba-crimson)' },
+            { id: 'terra',  label: 'TERRA',    color: 'var(--ba-gold)' },
+            { id: 'galaxy', label: 'IMPERIUM', color: '#ffce5a' },
+          ].map(({ id, label, color }) => (
+            <button
+              key={id}
+              className="mob-action-btn"
+              onClick={() => setActiveHolo(id)}
+              style={activeHolo === id
+                ? { background: 'rgba(204,34,0,0.22)', borderColor: color, color: '#fff' }
+                : undefined}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <iframe
+          title="Orbital Holo Survey"
+          src={activeHolo === 'baal' ? 'Baal_holo.html' : activeHolo === 'terra' ? 'Terra_holo.html' : 'Galaxy_holo.html'}
+          style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', inset: 0 }}
+        />
+
+        {/* CRT over the lens */}
+        <div className="scanlines" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }} aria-hidden="true" />
+        <div className="vignette"  style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }} aria-hidden="true" />
       </div>
 
       {/* ── SCROLLABLE LIST OF CATEGORIES ── */}

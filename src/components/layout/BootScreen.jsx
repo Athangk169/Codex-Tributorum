@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AudioCore } from '../../utils/audioCore';
 import { couchLogin } from '../../utils/couchAuth';
+import ShrineBackdrop from './ShrineBackdrop';
 
 // ◈ COUCHDB HOST CONFIG ◈
 const COUCHDB_HOST = "192.168.29.100:5984";
@@ -83,11 +83,8 @@ const BootScreen = ({ onComplete }) => {
   useEffect(() => {
     if (phase !== 'terminal') return;
 
-    AudioCore.startTyping();
-
     if (currentLineIndex >= bootSequence.length) {
       const finishTimer = setTimeout(() => {
-        AudioCore.stopTyping();
         setPhase('exiting');
         setTimeout(() => onComplete({ username: username.trim(), password: password.trim() }), 800);
       }, 1500);
@@ -222,19 +219,8 @@ const BootScreen = ({ onComplete }) => {
       <div className="scanlines" style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }} />
       <div className="vignette"  style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }} />
 
-      {/* ── Rotating cog background (login + prompt phases) ── */}
-      {(phase === 'login' || phase === 'prompt') && (
-        <div style={{
-          position: 'absolute', zIndex: 1,
-          width: '100vw', height: '100vh',
-          backgroundImage: 'url(/cog.jpeg)',
-          backgroundSize: 'contain', backgroundPosition: 'center', backgroundRepeat: 'no-repeat',
-          opacity: 0.35,
-          filter: 'grayscale(100%) sepia(80%) hue-rotate(330deg) brightness(0.4) contrast(1.3)',
-          animation: 'cogRotation 60s linear infinite',
-          transformOrigin: 'center center',
-        }} />
-      )}
+      {/* ── Candlelit shrine backdrop (all phases) ── */}
+      <ShrineBackdrop dim={phase === 'terminal'} />
 
       {/* ════════════════════════════════════════════════════════
           PHASE: LOGIN
@@ -555,12 +541,6 @@ const BootScreen = ({ onComplete }) => {
         </div>
       )}
 
-      <style>{`
-        @keyframes cogRotation {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 };

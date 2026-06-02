@@ -1,18 +1,12 @@
 // src/utils/audioCore.js
 
 let bgmInstance = null;
-let typingInstance = null;
 let globalMuted = false;
 
 const applyMuteState = () => {
   if (bgmInstance) {
     bgmInstance.volume = globalMuted ? 0 : 0.4;
     bgmInstance.muted = globalMuted;
-  }
-
-  if (typingInstance) {
-    typingInstance.volume = globalMuted ? 0 : 0.6;
-    typingInstance.muted = globalMuted;
   }
 };
 
@@ -43,23 +37,6 @@ export const AudioCore = {
     if (bgmInstance) {
       bgmInstance.pause();
       bgmInstance.currentTime = 0;
-    }
-  },
-
-  startTyping: () => {
-    if (!typingInstance) {
-      typingInstance = new Audio(resolveAudioPath('/sounds/typing.mp3'));
-      typingInstance.loop = true;
-      typingInstance.volume = 0.6;
-    }
-    applyMuteState();
-    typingInstance.play().catch(e => console.warn('◈ TYPING BLOCKED:', e));
-  },
-
-  stopTyping: () => {
-    if (typingInstance) {
-      typingInstance.pause();
-      typingInstance.currentTime = 0;
     }
   },
 

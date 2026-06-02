@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import CrtOverlay from '../shared/CrtOverlay';
 
 // ─────────────────────────────────────────────────────────────
 // IdleLitanyOverlay
@@ -82,7 +83,34 @@ const STYLES = `
     background: rgba(0, 0, 0, 0.78);
   }
   .idle-litany.on { opacity: 1; }
+
+  /* Reliquary saint — screen-blend drops its black backdrop, so it floats
+     out of the darkened dashboard as the centrepiece. Sits behind the
+     scrolling litany. A slow breathing glow keeps it from feeling like a
+     flat sticker. */
+  .idle-saint {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    height: 94%;
+    max-height: 94vh;
+    width: auto;
+    transform: translateX(-50%);
+    object-fit: contain;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    z-index: 1;
+    filter: brightness(0.92) sepia(0.12) saturate(1.05);
+    animation: saintBreathe 9s ease-in-out infinite;
+  }
+  @keyframes saintBreathe {
+    0%, 100% { opacity: 0.48; }
+    50%      { opacity: 0.62; }
+  }
+
   .idle-litany__column {
+    position: relative;
+    z-index: 2;
     width: max-content;
     max-width: 92vw;
     color: rgba(255, 195, 95, 0.62);
@@ -101,6 +129,7 @@ const STYLES = `
   }
   @media (prefers-reduced-motion: reduce) {
     .idle-litany__column { animation: none; transform: none; }
+    .idle-saint { animation: none; opacity: 0.55; }
   }
 `;
 
@@ -109,21 +138,42 @@ const IdleLitanyOverlay = ({ idleMs = IDLE_MS }) => {
   const timerRef = useRef(null);
 
   useEffect(() => {
-    const reset = () => {
-      setIdle(false);
+    const arm = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         if (!document.hidden) setIdle(true);
       }, idleMs);
     };
+    const reset = () => {
+      setIdle(false);
+      arm();
+    };
+
+    // Pointer jitter guard. Optical mice and trackpads emit a steady trickle
+    // of sub-pixel mousemove events even when the user isn't really moving —
+    // enough to reset a 20s timer forever, so the litany never fires. Only
+    // treat movement past an 8px threshold as real activity.
+    let lastX = null, lastY = null;
+    const JITTER = 8;
+    const onMove = (e) => {
+      if (lastX !== null
+          && Math.abs(e.clientX - lastX) < JITTER
+          && Math.abs(e.clientY - lastY) < JITTER) return;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      reset();
+    };
+
     reset();
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'touchmove', 'wheel', 'scroll'];
-    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    window.addEventListener('mousemove', onMove, { passive: true });
+    const tapEvents = ['mousedown', 'keydown', 'touchstart', 'touchmove', 'wheel', 'scroll'];
+    tapEvents.forEach(e => window.addEventListener(e, reset, { passive: true }));
     const onVis = () => { if (document.hidden) reset(); };
     document.addEventListener('visibilitychange', onVis);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      events.forEach(e => window.removeEventListener(e, reset));
+      window.removeEventListener('mousemove', onMove);
+      tapEvents.forEach(e => window.removeEventListener(e, reset));
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [idleMs]);
@@ -136,7 +186,9 @@ const IdleLitanyOverlay = ({ idleMs = IDLE_MS }) => {
     <>
       <style>{STYLES}</style>
       <div className={`idle-litany ${idle ? 'on' : ''}`} aria-hidden="true">
+        <img className="idle-saint" src="/saint.png" alt="" aria-hidden="true" />
         <pre className="idle-litany__column">{body}</pre>
+        <CrtOverlay />
       </div>
     </>
   );

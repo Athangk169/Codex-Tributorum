@@ -378,6 +378,21 @@ body::before {
 .wm-aquila { background-image: url('/the-emperor-protects-1.jpg'); }
 .wm-cog    { background-image: url('/cog.jpeg'); }
 
+/* Patron-saint watermark — tall reliquary on one side. screen blend drops the
+   image's black backdrop so only the faint statue shows over the panel. */
+.wm-saint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url('/saint.png');
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: auto 96%;
+  opacity: 0.07;
+  mix-blend-mode: screen;
+  z-index: 0;
+}
+
 /* ── PURITY SEAL UTILITY ──
    Small decorative element, positioned via parent.
    <div class="purity-seal" />
@@ -789,9 +804,85 @@ body::before {
 ::-webkit-scrollbar-thumb { background: rgba(74,10,0,0.6); border: 1px solid var(--ba-border); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ba-crimson); }
 
-/* ── 20. LEGACY PURGE ── */
-.hymn-bg {
-  display:    none !important;
-  visibility: hidden !important;
-  opacity:    0 !important;
+/* ── 21. BOOT SHRINE BACKDROP ──
+   Candlelit Mechanicus shrine plate behind the boot screen. Rendered by
+   <ShrineBackdrop/> (shared by desktop + mobile boot screens). Sits at
+   z-index 1 inside the boot overlay, so it floats under the login/terminal
+   panels (z5) and still inherits the .scanlines + .vignette CRT overlays (z10).
+   Three stacked layers: the graded photo, a centre-darkening so panels stay
+   readable, then screen-blended candle-glow + incense-smoke that give the
+   static plate life. */
+.shrine-backdrop {
+  position: absolute; inset: 0;
+  z-index: 1; overflow: hidden; pointer-events: none;
+}
+
+/* Graded photo — warmed slightly toward imperial gold/red, teal shadows
+   knocked back, candles left alone. Slow "breathing" ember drift. */
+.shrine-backdrop__img {
+  position: absolute; inset: -1.5%;
+  background: url('/shrine_candles.jpg') center / cover no-repeat;
+  filter: saturate(1.08) contrast(1.05) brightness(0.9) sepia(0.16) hue-rotate(-6deg);
+  animation: shrineBreathe 16s ease-in-out infinite;
+}
+.shrine-backdrop.is-dim .shrine-backdrop__img {
+  filter: saturate(1.05) contrast(1.05) brightness(0.6) sepia(0.16) hue-rotate(-6deg);
+}
+@keyframes shrineBreathe {
+  0%, 100% { transform: scale(1);     filter: saturate(1.08) contrast(1.05) brightness(0.86) sepia(0.16) hue-rotate(-6deg); }
+  50%      { transform: scale(1.012); filter: saturate(1.10) contrast(1.05) brightness(0.96) sepia(0.16) hue-rotate(-6deg); }
+}
+
+/* Centre well — keeps the login panel / terminal box readable over the plate */
+.shrine-backdrop__center {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 44% 50% at 50% 52%,
+                rgba(2,0,0,0.80) 0%, rgba(2,0,0,0.30) 58%, transparent 76%);
+}
+.shrine-backdrop.is-dim .shrine-backdrop__center { background:
+  radial-gradient(ellipse 60% 64% at 50% 50%, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 60%, transparent 85%); }
+
+/* Candle light-pools: positioned by a wrapper (so the flicker's transform
+   doesn't fight the centring translate), inner element does the flicker. */
+.candle-glow-pos { position: absolute; transform: translate(-50%, -50%); pointer-events: none; }
+.candle-glow {
+  position: absolute; inset: 0; border-radius: 50%;
+  mix-blend-mode: screen;
+  background: radial-gradient(circle,
+                rgba(255,176,72,0.50) 0%, rgba(255,120,30,0.16) 45%, transparent 70%);
+  filter: blur(9px);
+  animation: candleFlicker var(--fdur, 2.2s) ease-in-out var(--fdelay, 0s) infinite alternate;
+  will-change: opacity, transform;
+}
+@keyframes candleFlicker {
+  0%   { opacity: 0.42; transform: scale(0.97); }
+  30%  { opacity: 0.66; transform: scale(1.02); }
+  55%  { opacity: 0.50; transform: scale(0.99); }
+  100% { opacity: 0.72; transform: scale(1.03); }
+}
+
+/* Incense smoke wisps rising off the candle clusters (screen-blended, faint) */
+.incense-pos { position: absolute; transform: translate(-50%, -50%); pointer-events: none; }
+.incense {
+  position: absolute; inset: 0;
+  mix-blend-mode: screen; opacity: 0;
+  background: radial-gradient(ellipse 50% 62% at 50% 72%,
+                rgba(206,196,176,0.18) 0%, transparent 72%);
+  filter: blur(16px);
+  animation: incenseRise var(--sdur, 12s) linear var(--sdelay, 0s) infinite;
+  will-change: opacity, transform;
+}
+@keyframes incenseRise {
+  0%   { opacity: 0;                  transform: translateY(22px)  translateX(0)              scale(0.7); }
+  16%  { opacity: var(--smax, 0.45); }
+  70%  { opacity: calc(var(--smax, 0.45) * 0.45); }
+  100% { opacity: 0;                  transform: translateY(-130px) translateX(var(--sdrift, 16px)) scale(1.5); }
+}
+
+/* CRT/atmosphere only — honour reduced-motion by freezing the lot */
+@media (prefers-reduced-motion: reduce) {
+  .shrine-backdrop__img,
+  .candle-glow,
+  .incense { animation: none; }
+  .incense { opacity: 0; }
 }

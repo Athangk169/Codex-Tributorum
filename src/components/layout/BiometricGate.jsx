@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 import { Capacitor } from '@capacitor/core';
+import CrtOverlay from '../shared/CrtOverlay';
 
 // ─────────────────────────────────────────────────────────────
 // BiometricGate
@@ -245,6 +246,7 @@ const BiometricGate = ({ children }) => {
         <button type="button" className="biolock-link" onClick={wipeAndContinue}>
           purge cached creds + manual login
         </button>
+        <CrtOverlay />
       </div>
     </>
   );

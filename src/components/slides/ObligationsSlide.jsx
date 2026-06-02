@@ -68,6 +68,9 @@ const OBL_STYLES = `
     animation: oblReveal 0.22s ease-out both;
   }
 
+  /* Lift the slide content above the patron-saint watermark (.wm-saint) */
+  .obl-tabs, .obl-tab-panel { position: relative; z-index: 1; }
+
   /* ── Stats bar ── */
   .obl-stats-bar {
     display:       flex;
@@ -819,7 +822,10 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   return (
     <>
       <style>{OBL_STYLES}</style>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', overflow: 'hidden' }}>
+
+        {/* Patron-saint watermark — faint reliquary presiding over the ledger */}
+        <div className="wm-saint" aria-hidden="true" />
 
         {/* ── Tab strip ── */}
         <div className="obl-tabs">

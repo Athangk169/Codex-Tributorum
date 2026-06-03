@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import HeartbeatTrace from '../shared/HeartbeatTrace';
+import BinaryCantStream from '../shared/BinaryCantStream';
+import MechanicusCog from '../shared/MechanicusCog';
 import NumberTick from '../shared/NumberTick';
 
 const LORE_STRINGS = [
@@ -280,7 +281,9 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
               color: '#b8923e', fontSize: '10px', letterSpacing: '1px', gap: '8px',
             }}>
               NOOSPHERIC LINK
-              <HeartbeatTrace rate={beat.rate} color={beat.color} width={42} />
+              {/* Cog-skull + binary cant stream, both paced by syncLed. */}
+              <MechanicusCog rate={beat.rate} color={beat.color} size={20} state={syncLed} />
+              <BinaryCantStream rate={beat.rate} color={beat.color} width={72} />
               <span className={ledClass} style={{
                 display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%',
               }} />

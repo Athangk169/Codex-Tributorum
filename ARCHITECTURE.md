@@ -84,7 +84,8 @@ src/
 │   │   ├── LoreTicker.jsx      # rotating quote ticker
 │   │   ├── SlideTransition.jsx # scan-wipe between slides
 │   │   ├── SlideErrorBoundary.jsx  # per-slide crash isolation
-│   │   ├── HeartbeatTrace.jsx  # SVG pulse line
+│   │   ├── MechanicusCog.jsx   # spinning cog-skull noospheric readout
+│   │   ├── BinaryCantStream.jsx # scrolling binary cant noospheric readout
 │   │   ├── NumberTick.jsx      # animated number counter
 │   │   └── loreQuotes.js       # corpus for LoreTicker
 │   │

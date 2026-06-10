@@ -3,7 +3,7 @@ import CrtOverlay from '../shared/CrtOverlay';
 
 // ─────────────────────────────────────────────────────────────
 // IdleLitanyOverlay
-// After ~20s of no user input, fades in a slow vertically-
+// After 1 minute of no user input, fades in a slow vertically-
 // scrolling adept litany behind the UI (mix-blend-mode: screen,
 // very low opacity — visible only where the dashboard is dark).
 // Reset on any meaningful input.
@@ -12,7 +12,7 @@ import CrtOverlay from '../shared/CrtOverlay';
 // prefers-reduced-motion (no scroll animation, just static text).
 // ─────────────────────────────────────────────────────────────
 
-const IDLE_MS = 20000;
+const IDLE_MS = 60000;
 
 // Canon litanies of the Cult Mechanicus and the Adeptus Astartes
 // IX Legion, formatted for vertical drift over a long idle window.
@@ -151,7 +151,7 @@ const IdleLitanyOverlay = ({ idleMs = IDLE_MS }) => {
 
     // Pointer jitter guard. Optical mice and trackpads emit a steady trickle
     // of sub-pixel mousemove events even when the user isn't really moving —
-    // enough to reset a 20s timer forever, so the litany never fires. Only
+    // enough to reset the idle timer forever, so the litany never fires. Only
     // treat movement past an 8px threshold as real activity.
     let lastX = null, lastY = null;
     const JITTER = 8;

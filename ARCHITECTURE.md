@@ -74,7 +74,7 @@ src/
 │   │   ├── SystemFooter.jsx    # desktop footer
 │   │   ├── CrtAmbient.jsx      # scanlines/flicker layer (z 9500)
 │   │   ├── TimeOfDayTint.jsx   # day/night colour overlay (z 9998)
-│   │   ├── IdleLitanyOverlay.jsx  # 20s-idle prayer scroll (z 9999)
+│   │   ├── IdleLitanyOverlay.jsx  # 60s-idle prayer scroll (z 9999)
 │   │   ├── SwUpdateBanner.jsx  # service worker update prompt (z 10000)
 │   │   └── ...
 │   │

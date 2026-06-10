@@ -214,7 +214,7 @@ back from CouchDB.
 
 ### Litany overlay doesn't appear
 
-It fires after 20s of *no interaction*. Stop touching the screen. Doesn't show in
+It fires after 1 minute of *no interaction*. Stop touching the screen. Doesn't show in
 maximised Holo mode (that slide goes z-index 9999 to match).
 
 ### Sync stuck on "AWAITING" forever

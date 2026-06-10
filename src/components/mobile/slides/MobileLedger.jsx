@@ -1,6 +1,7 @@
 // src/components/slides/MobileLedger.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { CategorizationEngine, AREngine } from '../../../utils/engine';
+import { localDateStr } from '../../../utils/localDate';
 
 // ── Cryptographic Placeholder ──
 const CryptoPlaceholder = ({ text, active }) => {
@@ -166,7 +167,7 @@ export default function MobileLedger({ data, dbTransactions, dbMetadata, user })
   const existingTags = AREngine.getAllTags(transactions);
 
   const blankForm = {
-    date: new Date().toISOString().split('T')[0],
+    date: localDateStr(),
     description: '', amount: '', method: '',
     category: 'Uncategorized',
     isReimbursable: false, reimbursementTag: '', notes: '',

@@ -1,5 +1,6 @@
 // src/components/slides/mobile/MobileAuspex.jsx
 import React, { useState, useEffect, useRef } from 'react';
+import { localMonthStr } from '../../../utils/localDate';
 import ScrambleText from '../../shared/ScrambleText';
 import { FinanceEngine } from '../../../utils/engine';
 
@@ -644,7 +645,7 @@ export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMe
   const [editingHolding, setEditingHolding] = useState(null);
 
   // Archive (past-month dossier)
-  const todayMonth = new Date().toISOString().substring(0, 7);
+  const todayMonth = localMonthStr();
   const [archiveMonth, setArchiveMonth] = useState(todayMonth);
   const [archiveData, setArchiveData]   = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
@@ -717,7 +718,7 @@ export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMe
     if (!dbInvestments || holdings.length === 0) return;
     const autoCommitByDate = async () => {
       const today = new Date();
-      const monthStr = today.toISOString().substring(0, 7);
+      const monthStr = localMonthStr(today);
       const docId = `snapshot_${monthStr}`;
       
       try {
@@ -792,6 +793,9 @@ export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMe
         });
       }
       
+      // Stamp the holdings edit so the sync conflict resolver can tell a
+      // user holdings change apart from the daemon's price-only writes.
+      doc.holdings_updated = new Date().toISOString();
       await dbInvestments.put(doc);
       setHoldings((doc.assets ?? []).map(normalizeAsset));
       setIsModalOpen(false);

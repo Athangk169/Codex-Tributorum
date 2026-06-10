@@ -1,4 +1,5 @@
 // src/utils/engine.js
+import { localDateStr } from './localDate';
 // ─────────────────────────────────────────────────────────────
 // Codex Tributorum — Finance Engine v2
 //
@@ -382,7 +383,7 @@ export const CardEngine = {
       } catch (_) {}
 
       if (openingDebt > 0) {
-        const oldestKey = sortedKeys[0] || this.getDueDateBucket(new Date().toISOString(), card);
+        const oldestKey = sortedKeys[0] || this.getDueDateBucket(localDateStr(), card);
         if (!buckets[oldestKey]) buckets[oldestKey] = { due_date: oldestKey, total: 0, paid: 0, transactions: [] };
         buckets[oldestKey].total += openingDebt;
         if (!sortedKeys.includes(oldestKey)) sortedKeys.push(oldestKey);
@@ -428,7 +429,7 @@ export const CardEngine = {
       }
       const creditBalance = creditPool;
 
-      const today        = new Date().toISOString().substring(0, 10);
+      const today        = localDateStr();
       const finalBuckets = sortedKeys.map(key => {
         const b           = buckets[key];
         const outstanding = Math.max(0, b.total - b.paid);
@@ -1200,7 +1201,7 @@ export const ObligationsEngine = {
         tolerance:          data.tolerance          ?? 0.10,
         frequency:          data.frequency          || 'monthly',
         frequency_interval: data.frequency_interval || 1,
-        start_date:         data.start_date         || new Date().toISOString().substring(0, 10),
+        start_date:         data.start_date         || localDateStr(),
         day_of_cycle:       data.day_of_cycle        || 1,
         category:           data.category           || 'Uncategorized',
         account:            data.account            || '',
@@ -1295,9 +1296,9 @@ export const ObligationsEngine = {
       dueDate.setDate(Math.min(dueDay, maxDay));
 
       return {
-        cycleStart: cycleStart.toISOString().substring(0, 10),
-        cycleEnd:   cycleEnd.toISOString().substring(0, 10),
-        dueDate:    dueDate.toISOString().substring(0, 10),
+        cycleStart: localDateStr(cycleStart),
+        cycleEnd:   localDateStr(cycleEnd),
+        dueDate:    localDateStr(dueDate),
       };
     }
 
@@ -1319,9 +1320,9 @@ export const ObligationsEngine = {
     const dueDate    = new Date(cycleStartMs + (Math.min(dueDay, daysPerCycle) - 1) * 86400000);
 
     return {
-      cycleStart: cycleStart.toISOString().substring(0, 10),
-      cycleEnd:   cycleEnd.toISOString().substring(0, 10),
-      dueDate:    dueDate.toISOString().substring(0, 10),
+      cycleStart: localDateStr(cycleStart),
+      cycleEnd:   localDateStr(cycleEnd),
+      dueDate:    localDateStr(dueDate),
     };
   },
 
@@ -1342,7 +1343,7 @@ export const ObligationsEngine = {
       const recurring = await this.getRecurring(metadataDB, userId);
       if (!recurring.length) return [];
 
-      const today = new Date().toISOString().substring(0, 10);
+      const today = localDateStr();
       const [accounts, cards] = await Promise.all([
         AccountEngine.getAccounts(metadataDB, userId),
         AccountEngine.getCards(metadataDB, userId)
@@ -1530,7 +1531,7 @@ export const ObligationsEngine = {
         interest_rate:     Number(data.interest_rate)     || 0,
         rate_type:         data.rate_type          || 'floating',
         rate_history:      [{
-          date: data.start_date || new Date().toISOString().substring(0, 10),
+          date: data.start_date || localDateStr(),
           rate: Number(data.interest_rate) || 0
         }],
         phase:             data.phase              || 'moratorium',
@@ -1541,7 +1542,7 @@ export const ObligationsEngine = {
         payment_sources:   data.payment_sources    || [],
         debit_account:     data.debit_account      || '',
         emi_account:       data.emi_account        || null,
-        start_date:        data.start_date         || new Date().toISOString().substring(0, 10),
+        start_date:        data.start_date         || localDateStr(),
         expected_end_date: data.expected_end_date  || null,
         status:            'active',
         notes:             data.notes              || '',
@@ -1563,7 +1564,7 @@ export const ObligationsEngine = {
       // If rate is being updated, append to rate_history
       if (updates.interest_rate !== undefined && updates.interest_rate !== doc.interest_rate) {
         const effectiveDate = updates.rate_effective_date
-          || new Date().toISOString().substring(0, 10);
+          || localDateStr();
         const history = [...(doc.rate_history || []), {
           date: effectiveDate,
           rate: Number(updates.interest_rate)
@@ -2028,7 +2029,7 @@ export const ObligationsEngine = {
         interest_rate:   Number(data.interest_rate) || 0,
         rate_type:       'fixed',
         account:         data.account               || '',
-        purchase_date:   data.purchase_date         || new Date().toISOString().substring(0, 10),
+        purchase_date:   data.purchase_date         || localDateStr(),
         first_emi_date:  data.first_emi_date        || null,
         category:        data.category              || 'Uncategorized',
         status:          'active',
@@ -2173,7 +2174,7 @@ export const ObligationsEngine = {
       if (emi.first_emi_date && monthsRemaining > 0) {
         const first = new Date(emi.first_emi_date);
         first.setMonth(first.getMonth() + monthsPaid);
-        nextDueDate = first.toISOString().substring(0, 10);
+        nextDueDate = localDateStr(first);
       }
 
       // Payoff date

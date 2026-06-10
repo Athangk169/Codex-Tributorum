@@ -1,5 +1,6 @@
 // src/components/slides/LedgerSlide.jsx
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { localDateStr } from '../../utils/localDate';
 import { CategorizationEngine, AREngine } from '../../utils/engine';
 
 // ── CryptoPlaceholder ─────────────────────────────────────────
@@ -182,7 +183,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const rowRef   = useRef(null);
 
   const blankForm = {
-    date: new Date().toISOString().split('T')[0],
+    date: localDateStr(),
     description: '', amount: '', method: '',
     category: 'Uncategorized',
     isReimbursable: false, reimbursementTag: '', notes: '',
@@ -576,7 +577,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     const category = tx.category || 'Uncategorized';
 
     setFormData({
-      date:             tx.date || new Date().toISOString().split('T')[0],
+      date:             tx.date || localDateStr(),
       description:      tx.description || '',
       amount:           Math.abs(tx.amount || 0).toString(),
       method:           subId,

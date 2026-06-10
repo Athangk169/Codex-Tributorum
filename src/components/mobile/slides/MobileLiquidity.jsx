@@ -181,7 +181,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
       <div className="panel mech-panel" style={{ padding: '10px 12px', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="sec-ttl" style={{ margin: 0, border: 'none', color: 'var(--ba-crimson)', fontSize: '11px' }}>
-            BLOOD DEBT AUSPEX
+            DEBT AUSPEX
           </span>
           <button
             className="mech-btn"
@@ -446,7 +446,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                 </div>
               ) : (
                 <div style={{ textAlign: 'center', padding: '20px', fontSize: '11px', color: 'var(--text-d)', border: '1px dashed var(--ba-border-lo)' }}>
-                  <ScrambleText text="// ZERO BLOOD DEBT DETECTED //" />
+                  <ScrambleText text="// ZERO DEBT DETECTED //" />
                 </div>
               )}
             </div>

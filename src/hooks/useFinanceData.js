@@ -9,6 +9,7 @@ import {
   CategorizationEngine
 } from "../utils/engine";
 import { couchEndpoint } from "../utils/couchAuth";
+import { localDateStr } from "../utils/localDate";
 
 // ─────────────────────────────────────────────────────────────
 // useFinanceData
@@ -37,6 +38,11 @@ export const useFinanceData = (credentials) => {
     typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'warn'
   );
   const [dbs, setDbs]                 = useState({ txns: null, meta: null, inv: null });
+  // Set when sync sees an auth rejection (expired AuthSession cookie)
+  // while the server is reachable. The app bounces back to the login
+  // screen to mint a fresh cookie — the password is never kept in
+  // memory, so a silent re-auth isn't possible.
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     if (!credentials?.username) {
@@ -48,6 +54,7 @@ export const useFinanceData = (credentials) => {
     // the HttpOnly AuthSession cookie set by BootScreen's /_session
     // POST. The password no longer touches React state past boot.
     const { username } = credentials;
+    setSessionExpired(false);
 
     // ── Local PouchDB instances ──
     const dbTransactions = new PouchDB("finances");
@@ -101,6 +108,14 @@ export const useFinanceData = (credentials) => {
     const handleSyncError  = (err) => {
       console.error("◈ UPLINK FAILURE:", err.message || err);
       const msg = (err.message || err.name || '').toLowerCase();
+      // Server reachable but rejecting our credentials → the AuthSession
+      // cookie has expired (common after a long offline stretch). Retrying
+      // won't fix a 401; signal the app to re-authenticate instead.
+      if (err?.status === 401 || err?.name === 'unauthorized' || msg.includes('unauthorized')) {
+        setSyncLed('error');
+        setSessionExpired(true);
+        return;
+      }
       const isOffline =
         msg.includes('econnrefused') ||
         msg.includes('enotfound') ||
@@ -261,6 +276,10 @@ export const useFinanceData = (credentials) => {
       }
     };
 
+    // Calendar month the current data view was built for — lets the
+    // rollover watcher notice when we've crossed into a new month.
+    let activeMonth = null;
+
     // ── Data refresh ──
     const refreshData = async () => {
       console.log("◈ [DATA] Starting refresh");
@@ -270,6 +289,7 @@ export const useFinanceData = (credentials) => {
 
         const now              = new Date();
         const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        activeMonth = currentMonthPrefix;
 
         const [results, liveBalances, cardResults, accounts, cards, trends, arByTag, obligations] =
           await Promise.all([
@@ -300,7 +320,7 @@ export const useFinanceData = (credentials) => {
 
         // ── Aggregate buckets across ALL cards (not just default) ──
         // cardResults from CardEngine.buildBuckets(..., null) only covers the
-        // default card. For the Overview "BLOOD DEBT" KPI and the per-date
+        // default card. For the Overview "DEBT" KPI and the per-date
         // breakdown we need every card's buckets, merged by due_date.
         const allCardResults = await Promise.all(
           (cards || []).map(c =>
@@ -308,7 +328,7 @@ export const useFinanceData = (credentials) => {
           )
         );
 
-        const todayIso = new Date().toISOString().substring(0, 10);
+        const todayIso = localDateStr();
         const mergedByDate = new Map();
         allCardResults.forEach(r => {
           (r?.buckets || []).forEach(b => {
@@ -442,12 +462,84 @@ export const useFinanceData = (credentials) => {
       .on('change', debouncedRefresh)
       .on('error', handleSyncError);
 
+    // ── Month-rollover watcher ──
+    // currentMonthPrefix is computed inside refreshData, which only runs
+    // on mount or a data/sync change. If the app stays open across a month
+    // boundary with no activity (e.g. a long offline stretch), the
+    // Overview would keep showing the previous month. Re-refresh when the
+    // calendar month changes — on a 1-min tick and on foreground resume.
+    const checkMonthRollover = () => {
+      const d = new Date();
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (activeMonth && m !== activeMonth) refreshData();
+    };
+    const monthIv = setInterval(checkMonthRollover, 60000);
+    const onForegroundMonthCheck = () => { if (!document.hidden) checkMonthRollover(); };
+    document.addEventListener('visibilitychange', onForegroundMonthCheck);
+
+    // ── Investment-manifest conflict resolver ──
+    // The daemon updates prices on the SAME doc the user edits holdings
+    // on, so an offline holdings edit collides with the daemon's price
+    // writes on reconnect (the daemon's deep server-side rev chain would
+    // otherwise win and silently drop the edit). Resolve by merging:
+    // holdings from the user's edit (newest holdings_updated), prices from
+    // the freshest daemon write (newest last_updated).
+    const invManifestId = `finance:investments:current:${username}`;
+    let invResolveTimer = null;
+    const resolveInvConflicts = async () => {
+      try {
+        const doc = await dbInvestments.get(invManifestId, { conflicts: true });
+        const conflictRevs = doc._conflicts || [];
+        if (conflictRevs.length === 0) return;
+        const others = await Promise.all(
+          conflictRevs.map(rev => dbInvestments.get(invManifestId, { rev }).catch(() => null))
+        );
+        const all = [doc, ...others.filter(Boolean)];
+        const ts  = (d, f) => Date.parse(d?.[f] || '') || 0;
+        const holdingsRev = all.slice().sort((a, b) =>
+          (ts(b, 'holdings_updated') - ts(a, 'holdings_updated')) ||
+          (ts(b, 'last_updated')     - ts(a, 'last_updated'))
+        )[0];
+        const priceRev = all.slice().sort((a, b) => ts(b, 'last_updated') - ts(a, 'last_updated'))[0];
+        const priceMap = {};
+        (priceRev.assets || []).forEach(a => {
+          if (a.ticker != null) priceMap[a.ticker] = a.current_price ?? a.currentprice;
+        });
+        const mergedAssets = (holdingsRev.assets || []).map(a => {
+          const p = priceMap[a.ticker];
+          return p == null ? a : { ...a, current_price: p, currentprice: p };
+        });
+        await dbInvestments.put({
+          ...holdingsRev,
+          _id:  invManifestId,
+          _rev: doc._rev,
+          assets: mergedAssets,
+          last_updated: priceRev.last_updated || holdingsRev.last_updated,
+        });
+        // Drop the now-merged losing revisions so they don't resurface.
+        await Promise.all(conflictRevs.map(rev =>
+          dbInvestments.remove(invManifestId, rev).catch(() => {})
+        ));
+      } catch (_) { /* not found / offline — nothing to resolve */ }
+    };
+    const debouncedResolve = () => {
+      clearTimeout(invResolveTimer);
+      invResolveTimer = setTimeout(resolveInvConflicts, 800);
+    };
+    syncInv.on('change', debouncedResolve);
+    syncInv.on('paused', debouncedResolve);
+
     // Initial load — immediate, no debounce
     refreshData();
+    // Catch any conflict that was already sitting in the local replica.
+    debouncedResolve();
 
     return () => {
       clearTimeout(debounceTimer);
+      clearTimeout(invResolveTimer);
       clearInterval(probeIv);
+      clearInterval(monthIv);
+      document.removeEventListener('visibilitychange', onForegroundMonthCheck);
       localTxnChanges.cancel();
       localMetaChanges.cancel();
       syncTxns.cancel();
@@ -461,5 +553,5 @@ export const useFinanceData = (credentials) => {
 
   }, [credentials]);
 
-  return { financeData, isLoading, error, syncLed, dbs };
+  return { financeData, isLoading, error, syncLed, dbs, sessionExpired };
 };

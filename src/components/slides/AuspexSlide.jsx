@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { localMonthStr } from '../../utils/localDate';
 import ScrambleText from '../shared/ScrambleText';
 import { FinanceEngine } from '../../utils/engine';
 
@@ -804,7 +805,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
   const [editingHolding, setEditingHolding] = useState(null);
 
   // Archive (past-month dossier) state
-  const todayMonth = new Date().toISOString().substring(0, 7);
+  const todayMonth = localMonthStr();
   const [archiveMonth, setArchiveMonth] = useState(todayMonth);
   const [archiveData, setArchiveData] = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
@@ -882,7 +883,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
       const today = new Date();
       // FIX: Was `< 28` which prevented ALL snapshots before the 28th.
       // Now commits whenever holdings exist and the snapshot for this month is missing.
-      const monthStr = today.toISOString().substring(0, 7);
+      const monthStr = localMonthStr(today);
       const docId = `snapshot_${monthStr}`;
       try {
         const existing = await dbInvestments.get(docId).catch(() => null);
@@ -950,6 +951,9 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
           current_price: newAvgPrice,
         });
       }
+      // Stamp the holdings edit so the sync conflict resolver can tell a
+      // user holdings change apart from the daemon's price-only writes.
+      doc.holdings_updated = new Date().toISOString();
       await dbInvestments.put(doc);
       setHoldings((doc.assets ?? []).map(normalizeAsset));
       setIsModalOpen(false);

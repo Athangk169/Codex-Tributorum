@@ -1,5 +1,6 @@
 // src/components/slides/OverviewSlide.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { localDateStr } from '../../utils/localDate';
 import LoreTicker from '../shared/LoreTicker';
 
 // ── ScrambleText ──────────────────────────────────────────────
@@ -469,6 +470,12 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   const expense    = metrics.grossExpense || 0;
   const netIncome  = metrics.netIncome    || 0;
   const netExpense = metrics.netExpense   || 0;
+  // Main inflow mirrors gross expenditure: ALL money in, reimbursements
+  // included. The adjusted ledger's NET INCOME stays as actual earned
+  // income (grossIncome, reimbursements excluded) — symmetric with how
+  // NET SPEND strips reimbursable expenses out of gross expenditure.
+  const reimbursementsReceived = metrics.reimbursementsReceived || 0;
+  const totalIncome = income + reimbursementsReceived;
 
   const bankTotal  = buckets.Bank || 0;
   const cashTotal  = buckets.Cash || 0;
@@ -516,7 +523,11 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   });
   const topCats = Object.entries(catSpend).sort((a,b) => b[1]-a[1]).slice(0, 5);
 
-  const arByTag = data?.arByTag && Object.keys(data.arByTag).length > 0
+  // Trust the engine's all-time AR whenever present: an empty object means
+  // "all settled", not "not loaded". The current-month fallback below is
+  // only for the pre-load moment — using it when settled showed phantom
+  // pending AR (cross-month receipts missing + clamping).
+  const arByTag = data?.arByTag
     ? data.arByTag
     : (() => {
         const local = {};
@@ -544,7 +555,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   const handleClearAR = useCallback(async (tag, amt) => {
     if (!dbTransactions || !userId) return;
     const suffix  = Math.random().toString(36).substring(2, 10);
-    const today   = new Date().toISOString().split('T')[0];
+    const today   = localDateStr();
     const defAcct = data?.accounts?.find(a => a.is_default && a.parent === 'Bank')?._id?.split(':').pop() || 'bank_hdfc';
     await dbTransactions.put({
       _id:               `txn:${userId}:${today}:${suffix}`,
@@ -644,7 +655,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
           <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px' }}>
             <div className="ov-kpi-lbl">TITHE INFLOW</div>
             <div className="ov-kpi-val-md ov-kpi-green">
-              <ScrambleText text={income.toLocaleString()} />
+              <ScrambleText text={totalIncome.toLocaleString()} />
             </div>
           </div>
 
@@ -715,7 +726,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                     </>
                   ) : (
                     <>
-                      <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>BLOOD DEBT</div>
+                      <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>DEBT</div>
                       <div className="ov-debt-ok" style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
                         <ScrambleText text="0" />
                       </div>
@@ -752,7 +763,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                   <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, #4a0a00, transparent)', margin: '8px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span className="ov-kpi-lbl" style={{ color: isNetCredit ? 'var(--ba-gold-dim)' : '#cc2200' }}>
-                      {isNetCredit ? 'NET CREDIT' : 'BLOOD DEBT'}
+                      {isNetCredit ? 'NET CREDIT' : 'DEBT'}
                     </span>
                     <span
                       className={isNetCredit ? '' : 'ov-debt-warn glitch-crit'}

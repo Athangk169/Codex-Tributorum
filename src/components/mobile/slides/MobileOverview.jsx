@@ -1,5 +1,6 @@
 // src/components/slides/mobile/MobileOverview.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { localDateStr } from '../../../utils/localDate';
 import ScrambleText from '../../shared/ScrambleText';
 import LoreTicker from '../../shared/LoreTicker';
 
@@ -488,6 +489,11 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
   const expense    = metrics.grossExpense || 0;
   const netIncome  = metrics.netIncome    || 0;
   const netExpense = metrics.netExpense   || 0;
+  // Main inflow mirrors gross expenditure: ALL money in, reimbursements
+  // included. The adjusted ledger's NET INCOME stays actual earned
+  // income (grossIncome, reimbursements excluded).
+  const reimbursementsReceived = metrics.reimbursementsReceived || 0;
+  const totalIncome = income + reimbursementsReceived;
 
   const bank       = buckets.Bank ?? data?.liveBalances?.total ?? 0;
   const cash       = buckets.Cash       || 0;
@@ -544,7 +550,11 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
   const topCategories = Object.entries(categorySpending).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   // ── Recovery manifest — all-time AR from engine (cross-month correct) ──
-  const arByTag = data?.arByTag && Object.keys(data.arByTag).length > 0
+  // Trust the engine result whenever it's present: an empty object means
+  // "all settled", NOT "not loaded". Falling back to a current-month-only
+  // recompute when settled resurrected phantom pending AR (cross-month
+  // receipts missing + Math.max clamping). Only fall back pre-load.
+  const arByTag = data?.arByTag
     ? data.arByTag
     : (() => {
         const local = {};
@@ -566,7 +576,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
   const handleClearAR = useCallback(async (tag, amt) => {
     if (!dbTransactions || !userId) return;
     const suffix  = Math.random().toString(36).substring(2, 10);
-    const today   = new Date().toISOString().split('T')[0];
+    const today   = localDateStr();
     const defAcct = data?.accounts?.find(a => a.is_default && a.parent === 'Bank')?._id?.split(':').pop() || 'bank_hdfc';
     await dbTransactions.put({
       _id:               `txn:${userId}:${today}:${suffix}`,
@@ -629,7 +639,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>GROSS TITHE</div>
-            <div className={`mo-val ${income === 0 ? 'white' : ''}`} style={{ fontSize: '18px' }}><ScrambleText text={income.toLocaleString()} speed={80} step={0.067} /></div>
+            <div className={`mo-val ${totalIncome === 0 ? 'white' : ''}`} style={{ fontSize: '18px' }}><ScrambleText text={totalIncome.toLocaleString()} speed={80} step={0.067} /></div>
           </div>
           <div className="mo-panel">
             <div className="mo-ttl" style={{ fontSize: '8px' }}>TOTAL EXPEND</div>
@@ -718,7 +728,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
               ) : (
                 <>
                   <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
-                    BLOOD DEBT
+                    DEBT
                   </div>
                   <div className="mo-val ov-debt-ok" style={{ fontSize: '26px' }}>
                     <ScrambleText text="0" />
@@ -757,7 +767,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
               <div className="mo-divider" />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span style={{ fontSize: '9px', color: isNetCredit ? '#b8923e' : '#cc2200', letterSpacing: '2px' }}>
-                  {isNetCredit ? 'NET CREDIT' : 'BLOOD DEBT'}
+                  {isNetCredit ? 'NET CREDIT' : 'DEBT'}
                 </span>
                 <span
                   className={isNetCredit ? 'mo-val' : 'mo-val ov-debt-warn glitch-crit'}

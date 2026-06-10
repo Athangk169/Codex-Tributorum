@@ -58,7 +58,14 @@ function App() {
     prevSlideRef.current = activeSlide;
   }, [activeSlide]);
 
-  const { financeData, isLoading, syncLed, dbs } = useFinanceData(credentials);
+  const { financeData, isLoading, syncLed, dbs, sessionExpired } = useFinanceData(credentials);
+
+  // Session cookie expired (e.g. after a long offline stretch). The sync
+  // layer can't silently re-auth because the password isn't retained, so
+  // bounce back to the boot/login screen to mint a fresh /_session cookie.
+  useEffect(() => {
+    if (sessionExpired && !isBooting) setIsBooting(true);
+  }, [sessionExpired, isBooting]);
 
   useEffect(() => {
     if (!isBooting) AudioCore.playBGM();

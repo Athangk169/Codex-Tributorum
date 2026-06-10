@@ -232,7 +232,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
 
           {/* Title */}
           <div className="sec-ttl" style={{ margin: 0, border: 'none', color: 'var(--ba-crimson)', flexShrink: 0, paddingRight: '6px', borderRight: '1px solid var(--ba-border)' }}>
-            BLOOD DEBT AUSPEX
+            DEBT AUSPEX
           </div>
 
           {/* Card ribbon */}
@@ -516,7 +516,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                             </span>
                           ) : (
                             <span className="blink" style={{ color: 'var(--border-hi)' }}>
-                              // ZERO BLOOD DEBT DETECTED // PRAISE THE OMNISSIAH //
+                              // ZERO DEBT DETECTED // PRAISE THE OMNISSIAH //
                             </span>
                           )}
                         </td>

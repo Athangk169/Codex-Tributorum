@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
+import { localDateStr } from '../../utils/localDate';
 import { CategorizationEngine, ObligationsEngine } from '../../utils/engine';
 
 // ── Shared ScrambleText ────────────────────────────────────────
@@ -397,7 +398,7 @@ const fmt = (n) => `${Math.round(n || 0).toLocaleString('en-IN')}`;
 // ── Blank form states ──────────────────────────────────────────
 const BLANK_REC = {
   name: '', amount: '', tolerance: '10', frequency: 'monthly',
-  frequency_interval: '1', start_date: new Date().toISOString().substring(0, 10),
+  frequency_interval: '1', start_date: localDateStr(),
   day_of_cycle: '1', category: '', account: '', match_by: 'category+account',
   keywords: '', notes: ''
 };
@@ -406,19 +407,19 @@ const BLANK_LOAN = {
   name: '', loan_type: 'education', sanctioned_amount: '', disbursed_amount: '',
   interest_rate: '', rate_type: 'floating', phase: 'moratorium',
   moratorium_end: '', emi: '0', emi_day: '5', debit_account: '', emi_account: '',
-  start_date: new Date().toISOString().substring(0, 10), notes: ''
+  start_date: localDateStr(), notes: ''
 };
 
 const BLANK_EMI = {
   name: '', total_amount: '', down_payment: '0', emi_amount: '',
   tenure_months: '12', interest_rate: '0', account: '',
-  purchase_date: new Date().toISOString().substring(0, 10),
+  purchase_date: localDateStr(),
   first_emi_date: '', category: '', notes: ''
 };
 
 const blankLoanLog = () => ({
   amount: '',
-  date: new Date().toISOString().substring(0, 10),
+  date: localDateStr(),
   description: '',
   paidBy: '',
   account: ''
@@ -470,7 +471,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   const [loanLogTarget, setLoanLogTarget] = useState(null);
   const [loanLogForm, setLoanLogForm] = useState(blankLoanLog);
   const [emiPayTarget, setEmiPayTarget] = useState(null);
-  const [emiPayForm, setEmiPayForm] = useState({ amount: '', date: new Date().toISOString().substring(0, 10) });
+  const [emiPayForm, setEmiPayForm] = useState({ amount: '', date: localDateStr() });
 
   const obligations = data?.obligations || {
     recurring: [], loans: [], emis: [],
@@ -535,7 +536,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       tolerance:          String(Math.round((rec.tolerance ?? 0.1) * 100)),
       frequency:          rec.frequency || 'monthly',
       frequency_interval: String(rec.frequency_interval ?? 1),
-      start_date:         rec.start_date || new Date().toISOString().substring(0, 10),
+      start_date:         rec.start_date || localDateStr(),
       day_of_cycle:       String(rec.day_of_cycle ?? 1),
       category:           rec.category || '',
       account:            rec.account || '',
@@ -571,7 +572,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     setLoanLogTarget({ loanId: loan._id, type });
     setLoanLogForm({
       amount: type === 'payment' && loan.emi ? String(loan.emi) : '',
-      date: new Date().toISOString().substring(0, 10),
+      date: localDateStr(),
       description: '',
       paidBy: userId || '',
       account: loan.emi_account || loan.debit_account || ''
@@ -691,7 +692,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       emi_day: String(loan.emi_day ?? '5'),
       debit_account: loan.debit_account || '',
       emi_account: loan.emi_account || '',
-      start_date: loan.start_date || new Date().toISOString().substring(0, 10),
+      start_date: loan.start_date || localDateStr(),
       notes: loan.notes || ''
     });
     setEditingLoanId(loan._id);
@@ -758,7 +759,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       tenure_months:  String(emi.tenure_months ?? '12'),
       interest_rate:  String(emi.interest_rate ?? '0'),
       account:        emi.account || '',
-      purchase_date:  emi.purchase_date || new Date().toISOString().substring(0, 10),
+      purchase_date:  emi.purchase_date || localDateStr(),
       first_emi_date: emi.first_emi_date || '',
       category:       emi.category || '',
       notes:          emi.notes || ''
@@ -775,7 +776,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     setEmiPayTarget(emi._id);
     setEmiPayForm({
       amount: String(emi.emi_amount || ''),
-      date:   new Date().toISOString().substring(0, 10),
+      date:   localDateStr(),
     });
   };
 

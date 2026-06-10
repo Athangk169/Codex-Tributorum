@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 import { Capacitor } from '@capacitor/core';
 import { clearOfflineVerifier } from '../../utils/offlineVerifier';
@@ -20,9 +20,12 @@ import CrtOverlay from '../shared/CrtOverlay';
 // gate only stops bystanders from seeing the username/UI between
 // app launches.
 //
-// On every resume of the app (App returning from background) the
-// gate re-locks if it had previously been opened. This is the
-// "phone in your pocket → app open" defence.
+// The lock is armed only on a COLD launch. Minimising the app (it
+// stays in Recents) keeps the WebView process alive, so the gate does
+// NOT re-lock on resume from background. It re-locks only when the app
+// is swiped out of Recents (or the OS kills the process): the next
+// launch remounts this component and the initial check below locks
+// again.
 // ─────────────────────────────────────────────────────────────
 
 // We previously gated on the presence of a cached base64 token in
@@ -128,17 +131,6 @@ const STYLES = `
 const BiometricGate = ({ children }) => {
   const [phase, setPhase] = useState('checking');  // 'checking' | 'locked' | 'open'
   const [error, setError] = useState('');
-  const [hadOpened, setHadOpened] = useState(false);
-
-  // Cached result of the initial biometry availability check. Persists
-  // across re-renders so the visibilitychange handler can read it
-  // without re-querying the native plugin.
-  // Three states:
-  //   null    — initial check hasn't completed yet
-  //   true    — Capacitor + biometry enrolled, gate is meaningful
-  //   false   — desktop web build, or no biometry on this device. Gate
-  //             is a no-op; never lock on tab visibility either.
-  const biometryAvailableRef = useRef(null);
 
   const attemptUnlock = useCallback(async () => {
     setError('');
@@ -152,7 +144,6 @@ const BiometricGate = ({ children }) => {
         androidConfirmationRequired: false,
       });
       setPhase('open');
-      setHadOpened(true);
     } catch (e) {
       setError((e?.message || 'AUTHENTICATION FAILED').toUpperCase());
     }
@@ -167,9 +158,7 @@ const BiometricGate = ({ children }) => {
     // some return isAvailable=false, but either way we want the same
     // outcome: pass through, never lock.
     if (!Capacitor.isNativePlatform()) {
-      biometryAvailableRef.current = false;
       setPhase('open');
-      setHadOpened(true);
       return;
     }
 
@@ -178,7 +167,6 @@ const BiometricGate = ({ children }) => {
         const result = await BiometricAuth.checkBiometry();
         if (cancelled) return;
         const available = !!result?.isAvailable;
-        biometryAvailableRef.current = available;
 
         const hasToken = !!localStorage.getItem(TOKEN_KEY);
         if (available && hasToken) {
@@ -186,35 +174,23 @@ const BiometricGate = ({ children }) => {
           attemptUnlock();
         } else {
           setPhase('open');
-          setHadOpened(true);
         }
       } catch (_e) {
         // Plugin not present, no biometry hardware, etc. Pass through.
         if (!cancelled) {
-          biometryAvailableRef.current = false;
           setPhase('open');
-          setHadOpened(true);
         }
       }
     })();
     return () => { cancelled = true; };
   }, [attemptUnlock]);
 
-  // Re-lock on returning from background — only on a real biometric-
-  // capable device. Without this guard a desktop tab switch would
-  // dead-end at the lock screen with no way to authenticate out.
-  useEffect(() => {
-    const onVis = () => {
-      if (document.hidden) return;
-      if (!hadOpened) return;
-      if (biometryAvailableRef.current !== true) return;
-      if (!localStorage.getItem(TOKEN_KEY)) return;
-      setPhase('locked');
-      attemptUnlock();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [hadOpened, attemptUnlock]);
+  // NOTE: deliberately no re-lock on resume from background. Minimising
+  // the app (it stays in Recents) keeps the WebView process alive, so
+  // this component stays mounted and the unlocked phase persists. The
+  // gate re-arms only on a cold launch — swiping the app out of Recents
+  // (or the OS killing it) destroys the process, and the next launch
+  // remounts this component, where the initial check above locks again.
 
   const wipeAndContinue = () => {
     try {
@@ -223,7 +199,6 @@ const BiometricGate = ({ children }) => {
       localStorage.removeItem(TOKEN_KEY);
     } catch (_e) {}
     setPhase('open');
-    setHadOpened(true);
   };
 
   if (phase === 'checking') {

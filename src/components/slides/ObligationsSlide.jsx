@@ -257,6 +257,7 @@ const OBL_STYLES = `
   /* Card actions */
   .obl-card-actions {
     display:     flex;
+    flex-wrap:   wrap;
     gap:         6px;
     padding:     8px 16px 12px;
     border-top:  1px solid var(--ba-border-lo);
@@ -422,7 +423,8 @@ const blankLoanLog = () => ({
   date: localDateStr(),
   description: '',
   paidBy: '',
-  account: ''
+  account: '',
+  alreadyDeclared: false
 });
 
 const Input = ({ label, value, onChange, type = 'text', placeholder = '', ...rest }) => (
@@ -472,6 +474,11 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   const [loanLogForm, setLoanLogForm] = useState(blankLoanLog);
   const [emiPayTarget, setEmiPayTarget] = useState(null);
   const [emiPayForm, setEmiPayForm] = useState({ amount: '', date: localDateStr() });
+  const [rateTarget, setRateTarget] = useState(null);
+  const [rateForm, setRateForm] = useState({ rate: '', date: localDateStr() });
+  const [simForm, setSimForm] = useState({ prepay: '', extra: '' });
+  const [loanTxnsMap, setLoanTxnsMap] = useState({});
+  const [editLoanDrawnLock, setEditLoanDrawnLock] = useState(null);
 
   const obligations = data?.obligations || {
     recurring: [], loans: [], emis: [],
@@ -486,6 +493,14 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   const categories = data?.expenseCategories || [];
   const accounts   = data?.accounts || [];
   const cards      = data?.cards || [];
+
+  const accountOpts = accounts.map(a => ({ value: a._id?.split(':').pop() || a.name, label: a.name }));
+  // Preserve a stored value that isn't in the current account list
+  // (legacy free-text entries) so opening the edit form doesn't clobber it.
+  const withCurrentOpt = (opts, current) =>
+    current && !opts.some(o => o.value === current)
+      ? [...opts, { value: current, label: current }]
+      : opts;
 
   const flash = (msg, type = 'ok') => {
     setStatusMsg({ msg, type });
@@ -559,6 +574,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   const resetLoanForm = () => {
     setLoanForm(BLANK_LOAN);
     setEditingLoanId(null);
+    setEditLoanDrawnLock(null);
     setShowLoanForm(false);
   };
 
@@ -575,7 +591,8 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       date: localDateStr(),
       description: '',
       paidBy: userId || '',
-      account: loan.emi_account || loan.debit_account || ''
+      account: loan.emi_account || loan.debit_account || '',
+      alreadyDeclared: false
     });
   };
 
@@ -603,7 +620,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     interest_rate:     Number(loanForm.interest_rate)     || 0,
     emi:               Number(loanForm.emi)               || 0,
     tenure_months:     loanForm.tenure_months ? Number(loanForm.tenure_months) : null,
-    emi_day:           Number(loanForm.emi_day) || 5,
+    emi_day:           Math.min(31, Math.max(1, Number(loanForm.emi_day) || 5)),
     moratorium_end:    loanForm.moratorium_end || null,
     emi_account:       loanForm.emi_account || null,
   });
@@ -620,8 +637,21 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
 
   const handleSaveLoan = async () => {
     if (!loanForm.name || !loanForm.sanctioned_amount) return;
-    setSaving(true);
     const payload = normalizeLoanForm();
+    if (payload.sanctioned_amount < 0 || payload.disbursed_amount < 0 ||
+        payload.emi < 0 || (payload.tenure_months ?? 0) < 0) {
+      flash('Amounts cannot be negative', 'error');
+      return;
+    }
+    if (payload.interest_rate < 0 || payload.interest_rate > 100) {
+      flash('Interest rate must be between 0 and 100%', 'error');
+      return;
+    }
+    if (payload.disbursed_amount > payload.sanctioned_amount &&
+        !window.confirm('Drawn amount exceeds the sanctioned amount. Save anyway?')) {
+      return;
+    }
+    setSaving(true);
     const result = editingLoanId
       ? await ObligationsEngine.updateLoan(editingLoanId, payload, dbMetadata, userId)
       : await ObligationsEngine.addLoan(payload, dbMetadata, userId);
@@ -643,6 +673,21 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       return;
     }
 
+    if (loanLogTarget.type === 'drawdown') {
+      const drawn = Number(loan.disbursed_amount) || 0;
+      const sanc  = Number(loan.sanctioned_amount) || 0;
+      if (!loanLogForm.alreadyDeclared && sanc > 0 && drawn + amount > sanc &&
+          !window.confirm(`This drawdown takes the total drawn to ${fmt(drawn + amount)}, beyond the sanctioned ${fmt(sanc)}. Log anyway?`)) {
+        return;
+      }
+    } else {
+      const outstanding = loan.balance?.outstanding;
+      if (outstanding !== undefined && amount > outstanding + 0.01 &&
+          !window.confirm(`Payment exceeds the outstanding balance (${fmt(outstanding)}); the excess will not reduce the balance. Log anyway?`)) {
+        return;
+      }
+    }
+
     setSaving(true);
     const result = loanLogTarget.type === 'drawdown'
       ? await ObligationsEngine.recordDrawdown(
@@ -652,7 +697,8 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
           loanLogForm.description || `${loan.name} Drawdown`,
           dbTransactions,
           dbMetadata,
-          userId
+          userId,
+          { alreadyDeclared: loanLogForm.alreadyDeclared }
         )
       : await ObligationsEngine.recordPayment(
           loan._id,
@@ -678,6 +724,12 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
   };
 
   const handleEditLoan = (loan) => {
+    // Once drawdowns are logged, disbursed_amount is partly derived —
+    // direct edits would double-count them, so the field locks.
+    const logged = loan.balance?.totalDrawn || 0;
+    setEditLoanDrawnLock(logged > 0
+      ? { logged, opening: Math.max(0, (Number(loan.disbursed_amount) || 0) - logged) }
+      : null);
     setLoanForm({
       name: loan.name || '',
       loan_type: loan.loan_type || 'other',
@@ -685,7 +737,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
       disbursed_amount: String(loan.disbursed_amount ?? ''),
       interest_rate: String(loan.interest_rate ?? ''),
       rate_type: loan.rate_type || 'floating',
-      phase: loan.phase || 'moratorium',
+      phase: loan.storedPhase || loan.phase || 'moratorium',
       moratorium_end: loan.moratorium_end || '',
       emi: String(loan.emi ?? '0'),
       tenure_months: loan.tenure_months ? String(loan.tenure_months) : '',
@@ -700,6 +752,65 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     setActiveTab('debts');
   };
 
+  const openRateForm = (loan) => {
+    if (rateTarget === loan._id) {
+      setRateTarget(null);
+      return;
+    }
+    setRateTarget(loan._id);
+    setRateForm({ rate: String(loan.interest_rate ?? ''), date: localDateStr() });
+  };
+
+  const handleRateSubmit = async (loan) => {
+    const rate = Number(rateForm.rate);
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      flash('Rate must be between 0 and 100%', 'error');
+      return;
+    }
+    if (!rateForm.date) {
+      flash('Effective date required', 'error');
+      return;
+    }
+    setSaving(true);
+    const result = await ObligationsEngine.updateLoanRate(loan._id, rate, rateForm.date, dbMetadata, userId);
+    setSaving(false);
+    if (result.ok) {
+      flash('Interest rate updated');
+      markTouched(loan._id);
+      setRateTarget(null);
+    } else {
+      flash(result.error || 'Failed', 'error');
+    }
+  };
+
+  const loadLoanTxns = async (loanId) => {
+    if (!dbTransactions || !userId) return;
+    const txns = await ObligationsEngine.getLoanTransactions(loanId, dbTransactions, userId);
+    setLoanTxnsMap(m => ({ ...m, [loanId]: txns }));
+  };
+
+  const toggleLoanExpand = (loan) => {
+    const next = expandedLoan === loan._id ? null : loan._id;
+    setExpandedLoan(next);
+    setSimForm({ prepay: '', extra: '' });
+    if (next) loadLoanTxns(loan._id);
+  };
+
+  const handleDeleteLoanTxn = async (loan, txn) => {
+    const label = txn.category === 'Loan Drawdown' ? 'drawdown' : 'payment';
+    if (!window.confirm(`Delete this ${label} of ${fmt(Math.abs(txn.amount))} dated ${txn.date}? Balances will be recalculated.`)) return;
+    setSaving(true);
+    const result = await ObligationsEngine.deleteLoanTransaction(txn._id, dbTransactions, dbMetadata, userId);
+    setSaving(false);
+    if (result.ok) {
+      flash('Entry deleted — balances recalculated');
+      markTouched(loan._id);
+      loadLoanTxns(loan._id);
+    } else {
+      flash(result.error || 'Failed', 'error');
+    }
+  };
+
   // ── EMI handlers ─────────────────────────────────────────────
   const handleDeleteLoan = async (loan) => {
     if (!loan || !dbMetadata || !userId) return;
@@ -712,6 +823,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
     if (result.ok) {
       flash('Loan discharged');
       if (expandedLoan === loan._id) setExpandedLoan(null);
+      if (rateTarget === loan._id) setRateTarget(null);
       if (loanLogTarget?.loanId === loan._id) {
         setLoanLogTarget(null);
         setLoanLogForm(blankLoanLog());
@@ -1100,7 +1212,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                 </div>
               </div>
               <div className="obl-stat-chip">
-                <div className="obl-stat-chip-label">LIABILITY PRINCIPAL</div>
+                <div className="obl-stat-chip-label">TOTAL OUTSTANDING</div>
                 <div className="obl-stat-chip-val overdue">
                   <ScrambleText
                     text={fmt(
@@ -1152,8 +1264,17 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                   <div className="obl-form-grid">
                     <Input label="SANCTIONED" type="number" value={loanForm.sanctioned_amount}
                       onChange={v => setLoanForm(f => ({ ...f, sanctioned_amount: v }))} placeholder="2000000" />
-                    <Input label="DRAWN SO FAR" type="number" value={loanForm.disbursed_amount}
-                      onChange={v => setLoanForm(f => ({ ...f, disbursed_amount: v }))} placeholder="800000" />
+                    <div>
+                      <Input label="DRAWN SO FAR" type="number" value={loanForm.disbursed_amount}
+                        onChange={v => setLoanForm(f => ({ ...f, disbursed_amount: v }))} placeholder="800000"
+                        disabled={!!(editingLoanId && editLoanDrawnLock)}
+                        title={editingLoanId && editLoanDrawnLock ? 'Logged drawdowns exist — adjust via LOG DRAWDOWN instead' : undefined} />
+                      {editingLoanId && editLoanDrawnLock && (
+                        <div style={{ fontSize: '9px', color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)', marginTop: '3px', letterSpacing: '1px' }}>
+                          OPENING {fmt(editLoanDrawnLock.opening)} + LOGGED {fmt(editLoanDrawnLock.logged)} — ADJUST VIA DRAWDOWN LOG
+                        </div>
+                      )}
+                    </div>
                     <Input label="INTEREST RATE (%)" type="number" step="0.1" value={loanForm.interest_rate}
                       onChange={v => setLoanForm(f => ({ ...f, interest_rate: v }))} placeholder="10.5" />
                   </div>
@@ -1164,7 +1285,7 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                     />
                     <Input label="MORATORIUM END" type="date" value={loanForm.moratorium_end}
                       onChange={v => setLoanForm(f => ({ ...f, moratorium_end: v }))} />
-                    <Input label="EMI DAY" type="number" value={loanForm.emi_day}
+                    <Input label="EMI DAY" type="number" min="1" max="31" value={loanForm.emi_day}
                       onChange={v => setLoanForm(f => ({ ...f, emi_day: v }))} placeholder="5" />
                   </div>
                   <div className="obl-form-grid">
@@ -1172,8 +1293,13 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                       onChange={v => setLoanForm(f => ({ ...f, emi: v }))} placeholder="25000" />
                     <Input label="TENURE (MONTHS)" type="number" value={loanForm.tenure_months}
                       onChange={v => setLoanForm(f => ({ ...f, tenure_months: v }))} placeholder="120" />
-                    <Input label="EMI ACCOUNT" value={loanForm.emi_account}
-                      onChange={v => setLoanForm(f => ({ ...f, emi_account: v }))} placeholder="bank_hdfc" />
+                    <Select label="EMI ACCOUNT" value={loanForm.emi_account}
+                      onChange={v => setLoanForm(f => ({ ...f, emi_account: v }))}
+                      options={[
+                        { value: '', label: '-- NONE --' },
+                        ...withCurrentOpt(accountOpts, loanForm.emi_account)
+                      ]}
+                    />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
                     <button
@@ -1185,8 +1311,13 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                     </button>
                   </div>
                   <div className="obl-form-grid wide">
-                    <Input label="DEBIT ACCOUNT (DRAWDOWNS CREDITED TO)" value={loanForm.debit_account}
-                      onChange={v => setLoanForm(f => ({ ...f, debit_account: v }))} placeholder="HDFC Savings" />
+                    <Select label="DEBIT ACCOUNT (DRAWDOWNS CREDITED TO)" value={loanForm.debit_account}
+                      onChange={v => setLoanForm(f => ({ ...f, debit_account: v }))}
+                      options={[
+                        { value: '', label: '-- NONE --' },
+                        ...withCurrentOpt(accountOpts, loanForm.debit_account)
+                      ]}
+                    />
                     <Input label="START DATE" type="date" value={loanForm.start_date}
                       onChange={v => setLoanForm(f => ({ ...f, start_date: v }))} />
                   </div>
@@ -1213,15 +1344,34 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                   const phase = loan.balance?.phase || loan.phase || 'moratorium';
                   const storedPhase = loan.storedPhase || loan.balance?.storedPhase || loan.phase || 'moratorium';
                   const autoPhase = phase !== storedPhase;
+                  const fullyRepaid = (bal.outstanding ?? drawn) <= 0.01 && (bal.totalPaid || 0) > 0;
 
                 return (
                   <div key={loan._id} className={`obl-card${lastTouchedId === loan._id ? ' obl-highlight' : ''}`}>
                     <div className="obl-card-header">
                       <span className="obl-card-title">{loan.name}</span>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <span style={{ fontSize: '10px', color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)' }}>
                           {loan.loan_type?.toUpperCase()} · {loan.rate_type?.toUpperCase()}
                         </span>
+                        {bal.unverified && (
+                          <span className="obl-card-badge" style={{ border: '1px solid var(--ba-crimson)', color: 'var(--ba-crimson)' }}
+                            title="Balance computation failed — figures fall back to the declared drawn amount">
+                            BALANCE UNVERIFIED
+                          </span>
+                        )}
+                        {fullyRepaid && (
+                          <span className="obl-card-badge discharged" title="Outstanding is zero — discharge the indenture to archive it">
+                            FULLY REPAID
+                          </span>
+                        )}
+                        {!fullyRepaid && bal.emiStatus && (
+                          <span className={`obl-rec-badge ${bal.emiStatus}`}>
+                            {bal.emiStatus === 'paid'    ? '✓ EMI PAID'
+                            : bal.emiStatus === 'overdue' ? `EMI ${bal.emiDaysOverdue}D LATE`
+                            : 'EMI DUE'}
+                          </span>
+                        )}
                         <span className={`obl-card-badge ${phase}`}>
                           {phase === 'repayment' ? 'PENANCE' : phase?.toUpperCase()}
                           {autoPhase && (
@@ -1310,8 +1460,15 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         EDIT STATE
                       </button>
                       <button className="obl-action-btn primary"
-                        onClick={() => setExpandedLoan(isExpanded ? null : loan._id)}>
-                        {isExpanded ? 'HIDE SCHEDULE' : 'VIEW SCHEDULE'}
+                        onClick={() => toggleLoanExpand(loan)}>
+                        {isExpanded ? 'HIDE DETAILS' : 'VIEW DETAILS'}
+                      </button>
+                      <button
+                        className="obl-action-btn"
+                        onClick={() => openRateForm(loan)}
+                        disabled={!dbMetadata}
+                      >
+                        UPDATE RATE
                       </button>
                       <button
                         className="obl-action-btn"
@@ -1335,6 +1492,50 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                         DISCHARGE INDENTURE
                       </button>
                     </div>
+
+                    {rateTarget === loan._id && (
+                      <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
+                        <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                          UPDATE INTEREST RATE
+                        </div>
+                        <div className="obl-form-grid" style={{ marginBottom: '10px' }}>
+                          <Input
+                            label="NEW RATE (% P.A.)"
+                            type="number"
+                            step="0.05"
+                            value={rateForm.rate}
+                            onChange={v => setRateForm(f => ({ ...f, rate: v }))}
+                            placeholder={String(loan.interest_rate ?? '')}
+                          />
+                          <Input
+                            label="EFFECTIVE FROM"
+                            type="date"
+                            value={rateForm.date}
+                            onChange={v => setRateForm(f => ({ ...f, date: v }))}
+                          />
+                          <div style={{ alignSelf: 'end', fontSize: '9px', color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)', letterSpacing: '1px', paddingBottom: '8px' }}>
+                            INTEREST BEFORE THIS DATE KEEPS THE OLD RATE
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="mech-btn"
+                            onClick={() => handleRateSubmit(loan)}
+                            disabled={saving || rateForm.rate === '' || !rateForm.date}
+                            style={{ marginTop: 0, flex: 1 }}
+                          >
+                            {saving ? 'UPDATING...' : 'AUTHORIZE RATE CHANGE'}
+                          </button>
+                          <button
+                            className="obl-action-btn"
+                            onClick={() => setRateTarget(null)}
+                            style={{ flex: '0 0 120px' }}
+                          >
+                            CANCEL
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {loanLogTarget?.loanId === loan._id && (
                       <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
@@ -1387,6 +1588,20 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                             />
                           )}
                         </div>
+                        {loanLogTarget.type === 'drawdown' && (
+                          <label style={{
+                            display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px',
+                            fontSize: '10px', fontFamily: 'var(--mono)', letterSpacing: '1px',
+                            color: 'var(--ba-gold-mute)', cursor: 'pointer'
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={loanLogForm.alreadyDeclared}
+                              onChange={e => setLoanLogForm(f => ({ ...f, alreadyDeclared: e.target.checked }))}
+                            />
+                            ALREADY COUNTED IN DECLARED DRAWN TOTAL (BACKFILLING HISTORY)
+                          </label>
+                        )}
                         <div style={{ display: 'flex', gap: '8px' }}>
                           <button
                             className="mech-btn"
@@ -1407,57 +1622,184 @@ const ObligationsSlide = ({ data, dbMetadata, dbTransactions, userId }) => {
                       </div>
                     )}
 
-                    {/* Projection schedule (expandable) */}
-                    {isExpanded && phase === 'repayment' && loan.emi > 0 && (() => {
-                      const proj = ObligationsEngine.getLoanProjection(loan, bal.outstanding || drawn);
-                      if (proj.unpayable) {
-                        return (
-                          <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
-                            <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
-                              <span>REPAYMENT PROJECTION</span>
-                              <span>EMI BELOW MONTHLY INTEREST</span>
+                    {/* Expanded details — projection, simulator, FY interest, rate & entry history */}
+                    {isExpanded && (() => {
+                      const outstanding = bal.outstanding ?? drawn;
+                      const simPrepay   = Number(simForm.prepay) || 0;
+                      const simExtra    = Number(simForm.extra)  || 0;
+                      const simActive   = simPrepay > 0 || simExtra > 0;
+                      const baseline    = ObligationsEngine.getLoanProjection(loan, outstanding);
+                      const proj        = simActive
+                        ? ObligationsEngine.getLoanProjection(loan, outstanding, { prepayNow: simPrepay, extraMonthly: simExtra })
+                        : baseline;
+                      const monthsSaved = simActive && !proj.unpayable
+                        ? Math.max(0, baseline.schedule.length - proj.schedule.length)
+                        : 0;
+                      const interestAvoided = simActive
+                        ? Math.max(0, (baseline.totalRemInterest || 0) - (proj.totalRemInterest || 0))
+                        : 0;
+                      const fyEntries   = Object.entries(bal.interestPaidByFY || {})
+                        .sort((a, b) => b[0].localeCompare(a[0]));
+                      const rateHistory = [...(loan.rate_history || [])]
+                        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                      const loanTxns    = loanTxnsMap[loan._id];
+
+                      return (
+                        <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
+
+                          {/* ── Repayment projection + simulator ── */}
+                          <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                            <span>REPAYMENT PROJECTION{simActive ? ' · SIMULATED' : ''}</span>
+                            <span>
+                              {proj.indeterminate ? 'NO MORATORIUM END DATE'
+                              : proj.needsEmi     ? 'NO EMI OR TENURE DECLARED'
+                              : proj.unpayable    ? 'EMI BELOW MONTHLY INTEREST'
+                              : proj.payoffDate   ? `PAYOFF: ${proj.payoffDate}` : ''}
+                            </span>
+                          </div>
+
+                          {proj.indeterminate && (
+                            <div style={{ color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)', fontSize: '11px', letterSpacing: '1px', marginBottom: '10px' }}>
+                              SET A MORATORIUM END DATE TO PROJECT THE REPAYMENT PATH
                             </div>
-                            <div style={{ color: 'var(--ba-crimson)', fontFamily: 'var(--mono)', fontSize: '11px', letterSpacing: '1px' }}>
+                          )}
+                          {proj.needsEmi && (
+                            <div style={{ color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)', fontSize: '11px', letterSpacing: '1px', marginBottom: '10px' }}>
+                              DECLARE AN EMI AMOUNT OR TENURE TO PROJECT REPAYMENT
+                            </div>
+                          )}
+                          {proj.unpayable && (
+                            <div style={{ color: 'var(--ba-crimson)', fontFamily: 'var(--mono)', fontSize: '11px', letterSpacing: '1px', marginBottom: '10px' }}>
                               MINIMUM EMI TO REDUCE BALANCE: {fmt(proj.minimumEmi || 0)}
                             </div>
-                          </div>
-                        );
-                      }
-                      return proj.schedule.length > 0 ? (
-                        <div className="obl-reveal" style={{ padding: '0 16px 14px', borderTop: '1px solid var(--ba-border-lo)' }}>
-                          <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
-                            <span>REPAYMENT PROJECTION</span>
-                            <span>PAYOFF: {proj.payoffDate}</span>
-                          </div>
-                          <div style={{ maxHeight: '180px', overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: '10px' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                              <thead>
-                                <tr style={{ color: 'var(--ba-gold-dim)' }}>
-                                  {['MONTH','EMI','PRINCIPAL','INTEREST','BALANCE'].map(h => (
-                                    <th key={h} style={{ textAlign: 'right', padding: '3px 6px', fontWeight: 'normal' }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="obl-proj-tbody">
-                                {proj.schedule.slice(0, 24).map((row, i) => (
-                                  <tr key={i} style={{ borderBottom: '1px solid var(--ba-border-lo)' }}>
-                                    <td style={{ padding: '3px 6px', color: 'var(--ba-gold-mute)' }}>{row.month}</td>
-                                    <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--text-m)' }}>{fmt(row.emi)}</td>
-                                    <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--border-hi)' }}>{fmt(row.principal)}</td>
-                                    <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--ba-crimson)' }}>{fmt(row.interest)}</td>
-                                    <td style={{ textAlign: 'right', padding: '3px 6px', color: '#fff', fontWeight: 'bold' }}>{fmt(row.balance)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            {proj.schedule.length > 24 && (
-                              <div style={{ textAlign: 'center', color: 'var(--ba-gold-mute)', padding: '6px', letterSpacing: '1px' }}>
-                                + {proj.schedule.length - 24} MORE MONTHS · TOTAL INTEREST: {fmt(proj.totalRemInterest)}
+                          )}
+
+                          {!proj.indeterminate && !proj.needsEmi && (
+                            <div className="obl-form-grid" style={{ marginBottom: '10px' }}>
+                              <Input label="SIMULATE: PREPAY NOW" type="number" value={simForm.prepay}
+                                onChange={v => setSimForm(f => ({ ...f, prepay: v }))} placeholder="100000" />
+                              <Input label="SIMULATE: EXTRA PER EMI" type="number" value={simForm.extra}
+                                onChange={v => setSimForm(f => ({ ...f, extra: v }))} placeholder="5000" />
+                              <div style={{ alignSelf: 'end', fontFamily: 'var(--mono)', fontSize: '10px', letterSpacing: '1px', paddingBottom: '8px', color: simActive ? 'var(--border-hi)' : 'var(--ba-gold-mute)' }}>
+                                {simActive
+                                  ? `${monthsSaved} MO SAVED · ${fmt(interestAvoided)} INTEREST AVOIDED`
+                                  : 'ENTER AMOUNTS TO SIMULATE PREPAYMENT'}
                               </div>
-                            )}
+                            </div>
+                          )}
+
+                          {proj.moratoriumMonths > 0 && (
+                            <div style={{ color: 'var(--ba-gold)', fontFamily: 'var(--mono)', fontSize: '10px', letterSpacing: '1px', marginBottom: '8px' }}>
+                              MORATORIUM: {proj.moratoriumMonths} MONTHS REMAINING · BALANCE AT REPAYMENT START: {fmt(proj.balanceAtRepaymentStart)}
+                              {proj.projectedEmi && !loan.emi ? ` · PROJECTED EMI: ${fmt(proj.projectedEmi)}` : ''}
+                            </div>
+                          )}
+
+                          {proj.schedule.length > 0 && (
+                            <div style={{ maxHeight: '180px', overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: '10px', marginBottom: '4px' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ color: 'var(--ba-gold-dim)' }}>
+                                    {['MONTH','EMI','PRINCIPAL','INTEREST','BALANCE'].map(h => (
+                                      <th key={h} style={{ textAlign: 'right', padding: '3px 6px', fontWeight: 'normal' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody className="obl-proj-tbody">
+                                  {proj.schedule.slice(0, 24).map((row, i) => (
+                                    <tr key={i} style={{ borderBottom: '1px solid var(--ba-border-lo)', opacity: row.phase === 'moratorium' ? 0.65 : 1 }}>
+                                      <td style={{ padding: '3px 6px', color: 'var(--ba-gold-mute)' }}>
+                                        {row.month}{row.phase === 'moratorium' ? ' ◦' : ''}
+                                      </td>
+                                      <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--text-m)' }}>{row.phase === 'moratorium' ? '—' : fmt(row.emi)}</td>
+                                      <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--border-hi)' }}>{fmt(row.principal)}</td>
+                                      <td style={{ textAlign: 'right', padding: '3px 6px', color: 'var(--ba-crimson)' }}>{fmt(row.interest)}</td>
+                                      <td style={{ textAlign: 'right', padding: '3px 6px', color: '#fff', fontWeight: 'bold' }}>{fmt(row.balance)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {proj.schedule.length > 24 && (
+                                <div style={{ textAlign: 'center', color: 'var(--ba-gold-mute)', padding: '6px', letterSpacing: '1px' }}>
+                                  + {proj.schedule.length - 24} MORE MONTHS · TOTAL INTEREST: {fmt(proj.totalRemInterest)}
+                                </div>
+                              )}
+                              {proj.moratoriumMonths > 0 && (
+                                <div style={{ color: 'var(--ba-gold-mute)', padding: '4px 6px', letterSpacing: '1px' }}>
+                                  ◦ MORATORIUM MONTH — INTEREST CAPITALIZES
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ── Interest paid per financial year (Sec 80E) ── */}
+                          {fyEntries.length > 0 && (
+                            <>
+                              <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                                <span>INTEREST PAID BY FINANCIAL YEAR</span>
+                                {loan.loan_type === 'education' && <span>SEC 80E DEDUCTIBLE</span>}
+                              </div>
+                              <div style={{ fontFamily: 'var(--mono)', fontSize: '11px', marginBottom: '4px' }}>
+                                {fyEntries.map(([fy, amt]) => (
+                                  <div key={fy} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid var(--ba-border-lo)' }}>
+                                    <span style={{ color: 'var(--ba-gold-mute)' }}>FY {fy}</span>
+                                    <span style={{ color: 'var(--ba-gold)', fontWeight: 'bold' }}>{fmt(amt)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+
+                          {/* ── Rate history ── */}
+                          {rateHistory.length > 1 && (
+                            <>
+                              <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                                <span>RATE HISTORY</span>
+                              </div>
+                              <div style={{ fontFamily: 'var(--mono)', fontSize: '11px', marginBottom: '4px' }}>
+                                {rateHistory.map((entry, i) => (
+                                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid var(--ba-border-lo)' }}>
+                                    <span style={{ color: 'var(--ba-gold-mute)' }}>{entry.date || '—'}</span>
+                                    <span style={{ color: '#fff' }}>{entry.rate}% P.A.</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+
+                          {/* ── Logged drawdowns & payments ── */}
+                          <div className="obl-section-hdr" style={{ margin: '12px 0 8px' }}>
+                            <span>LEDGER ENTRIES</span>
+                            <span>{loanTxns ? `${loanTxns.length} LOGGED` : 'LOADING...'}</span>
                           </div>
+                          {loanTxns && loanTxns.length === 0 && (
+                            <div style={{ color: 'var(--ba-gold-mute)', fontFamily: 'var(--mono)', fontSize: '10px', letterSpacing: '1px' }}>
+                              NO DRAWDOWNS OR PAYMENTS LOGGED
+                            </div>
+                          )}
+                          {loanTxns && loanTxns.map(txn => (
+                            <div key={txn._id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0', borderBottom: '1px solid var(--ba-border-lo)', fontFamily: 'var(--mono)', fontSize: '10px' }}>
+                              <span style={{ color: 'var(--ba-gold-mute)', minWidth: '74px' }}>{txn.date}</span>
+                              <span style={{
+                                minWidth: '46px', letterSpacing: '1px',
+                                color: txn.category === 'Loan Drawdown' ? 'var(--ba-crimson)' : 'var(--border-hi)'
+                              }}>
+                                {txn.category === 'Loan Drawdown' ? 'DRAW' : 'PMT'}
+                              </span>
+                              <span style={{ flex: 1, color: 'var(--text-d)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {txn.description}{txn.paid_by && txn.paid_by !== userId ? ` · BY ${txn.paid_by.toUpperCase()}` : ''}
+                              </span>
+                              <span style={{ color: '#fff', fontWeight: 'bold' }}>{fmt(Math.abs(txn.amount))}</span>
+                              <button
+                                className="action-btn del"
+                                onClick={() => handleDeleteLoanTxn(loan, txn)}
+                                disabled={saving}
+                                title="Delete entry — balances recalculate"
+                              >DEL</button>
+                            </div>
+                          ))}
                         </div>
-                      ) : null;
+                      );
                     })()}
                   </div>
                 );

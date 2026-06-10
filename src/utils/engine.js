@@ -1538,7 +1538,7 @@ export const ObligationsEngine = {
         moratorium_end:    data.moratorium_end     || null,
         emi:               Number(data.emi)         || 0,
         tenure_months:     Number(data.tenure_months) || null,
-        emi_day:           data.emi_day            || 5,
+        emi_day:           Math.min(31, Math.max(1, Number(data.emi_day) || 5)),
         payment_sources:   data.payment_sources    || [],
         debit_account:     data.debit_account      || '',
         emi_account:       data.emi_account        || null,
@@ -1608,6 +1608,12 @@ export const ObligationsEngine = {
 
   _dateOnly(value) {
     if (!value) return null;
+    // Parse YYYY-MM-DD strings as LOCAL dates — new Date('2026-06-10')
+    // yields UTC midnight, which is the previous day west of UTC.
+    if (typeof value === 'string') {
+      const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    }
     const date = value instanceof Date ? value : new Date(value);
     if (isNaN(date.getTime())) return null;
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -1624,10 +1630,25 @@ export const ObligationsEngine = {
     return asOf >= moratoriumEnd ? 'repayment' : 'moratorium';
   },
 
+  // Day-of-month is clamped to the target month's length, so Jan 31 + 1mo
+  // lands on Feb 28/29 instead of overflowing into Mar 3 (setMonth drift).
   _addMonths(date, count = 1) {
-    const next = new Date(date);
-    next.setMonth(next.getMonth() + count);
-    return next;
+    const day = date.getDate();
+    const next = new Date(date.getFullYear(), date.getMonth() + count, 1);
+    return this._clampDay(next.getFullYear(), next.getMonth(), day);
+  },
+
+  // Build a Date for (year, monthIndex, day) with day clamped to the
+  // month's actual length — e.g. emi_day 31 in June → June 30.
+  _clampDay(year, monthIndex, day) {
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    return new Date(year, monthIndex, Math.min(Math.max(1, day), daysInMonth));
+  },
+
+  // Indian financial year key for a date: Apr 2025 – Mar 2026 → "2025-26".
+  _fyKey(date) {
+    const fyStart = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+    return `${fyStart}-${String((fyStart + 1) % 100).padStart(2, '0')}`;
   },
 
   _rateForDate(loan, date) {
@@ -1660,11 +1681,17 @@ export const ObligationsEngine = {
   // ── recordDrawdown ────────────────────────────────────────
   // Logs a loan drawdown as a transaction (money IN to your account)
   // and updates the loan's disbursed_amount.
-  async recordDrawdown(loanId, amount, date, description, transactionsDB, metadataDB, userId) {
+  // options.alreadyDeclared — the drawdown is already counted in the
+  // declared disbursed_amount (e.g. backfilling history), so don't
+  // increment it again. The choice is stored on the transaction as
+  // counted_in_disbursed so deletion can reverse it correctly.
+  async recordDrawdown(loanId, amount, date, description, transactionsDB, metadataDB, userId, options = {}) {
     try {
       const loan   = await metadataDB.get(loanId);
       if (loan.user_id !== userId) return { ok: false, error: 'Unauthorised' };
       const absAmount = Math.abs(Number(amount) || 0);
+      if (absAmount <= 0) return { ok: false, error: 'Amount must be positive' };
+      const alreadyDeclared = !!options.alreadyDeclared;
 
       const txnId = `txn:${userId}:${date}:drawdown_${Date.now()}`;
       await transactionsDB.put({
@@ -1672,52 +1699,23 @@ export const ObligationsEngine = {
         type:         'transaction',
         user_id:      userId,
         date,
-        amount:       Math.abs(amount),   // positive — money coming in
+        amount:       absAmount,   // positive — money coming in
         description:  description || `${loan.name} — Drawdown`,
         category:     'Loan Drawdown',
         account_type: 'Bank',
         sub_account:  loan.debit_account,
         loan_id:      loanId,
+        counted_in_disbursed: !alreadyDeclared,
         created:      new Date().toISOString()
       });
 
-      // Update disbursed_amount on the loan document
-      let priorDrawdownTotal = 0;
-      try {
-        const result = await transactionsDB.allDocs({
-          include_docs: true,
-          startkey: `txn:${userId}:`,
-          endkey:   `txn:${userId}:\uffff`
-        });
-        priorDrawdownTotal = result.rows.map(r => r.doc)
-          .filter(d =>
-            d.type === 'transaction' &&
-            d.user_id === userId &&
-            d.loan_id === loanId &&
-            d.category === 'Loan Drawdown' &&
-            d._id !== txnId
-          )
-          .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
-      } catch {
-        priorDrawdownTotal = 0;
+      if (!alreadyDeclared) {
+        loan.disbursed_amount = Math.max(0, Number(loan.disbursed_amount) || 0) + absAmount;
       }
-
-      const declaredDrawn = Math.max(0, Number(loan.disbursed_amount) || 0);
-      const startDate = this._dateOnly(loan.start_date || loan.created);
-      const drawdownDate = this._dateOnly(date);
-      const looksLikeOpeningDrawdown =
-        priorDrawdownTotal <= 0 &&
-        declaredDrawn > 0 &&
-        absAmount <= declaredDrawn &&
-        (!startDate || !drawdownDate || drawdownDate <= startDate);
-
-      if (!looksLikeOpeningDrawdown) {
-        loan.disbursed_amount = declaredDrawn + absAmount;
-      }
-      loan.updated          = new Date().toISOString();
+      loan.updated = new Date().toISOString();
       await metadataDB.put(loan);
 
-      return { ok: true, txnId, disbursedAmountUpdated: !looksLikeOpeningDrawdown };
+      return { ok: true, txnId, disbursedAmountUpdated: !alreadyDeclared };
     } catch (err) { return { ok: false, error: err.message }; }
   },
 
@@ -1726,48 +1724,42 @@ export const ObligationsEngine = {
   // For moratorium phase: all goes to interest (or capitalises).
   // For repayment phase: split provided by caller or calculated.
   //
-  // If principal_component + interest_component are not provided,
-  // the engine calculates the split from current outstanding + rate.
+  // If principal_component + interest_component are not provided, no
+  // split is stored — getLoanBalance derives it during replay, which
+  // stays correct even when payments are logged out of date order.
   async recordPayment(loanId, amount, date, paidBy, transactionsDB, metadataDB, userId, components = null, accountOverride = null) {
     try {
       const loan    = await metadataDB.get(loanId);
       if (loan.user_id !== userId) return { ok: false, error: 'Unauthorised' };
-
-      let principalComponent = 0;
-      let interestComponent  = Math.abs(amount);
-
-      if (components) {
-        principalComponent = components.principal || 0;
-        interestComponent  = components.interest  || 0;
-      } else if (this._effectiveLoanPhase(loan, date) === 'repayment' && loan.emi > 0) {
-        const balance = await this.getLoanBalance(loan, transactionsDB, userId, date);
-        interestComponent = Math.min(Math.abs(amount), Math.max(0, balance.outstandingInterest || balance.nextInterestDue || 0));
-        principalComponent = Math.max(0, Math.abs(amount) - interestComponent);
-      }
+      const absAmount = Math.abs(Number(amount) || 0);
+      if (absAmount <= 0) return { ok: false, error: 'Amount must be positive' };
 
       const account = paidBy === userId
         ? accountOverride || loan.emi_account || loan.debit_account
         : null; // external payer — no sub_account
 
       const txnId = `txn:${userId}:${date}:loanpmt_${Date.now()}`;
-      await transactionsDB.put({
+      const txn = {
         _id:                  txnId,
         type:                 'transaction',
         user_id:              userId,
         date,
-        amount:               -Math.abs(amount),  // negative — money going out
+        amount:               -absAmount,  // negative — money going out
         description:          `${loan.name} — Payment`,
         category:             'Loan Payment',
         account_type:         account ? 'Bank' : 'External',
         sub_account:          account || 'external',
         loan_id:              loanId,
         paid_by:              paidBy || userId,
-        principal_component:  principalComponent,
-        interest_component:   interestComponent,
         created:              new Date().toISOString()
-      });
+      };
+      if (components) {
+        txn.principal_component = Math.max(0, Number(components.principal) || 0);
+        txn.interest_component  = Math.max(0, Number(components.interest)  || 0);
+      }
+      await transactionsDB.put(txn);
 
-      return { ok: true, txnId, principalComponent, interestComponent };
+      return { ok: true, txnId };
     } catch (err) { return { ok: false, error: err.message }; }
   },
 
@@ -1785,17 +1777,21 @@ export const ObligationsEngine = {
   //   nextInterestDue     — projected interest for current month
   //   nextDueDate         — date of next scheduled payment
   //   phase               — current phase
-  async getLoanBalance(loan, transactionsDB, userId, asOfDate = null) {
+  async getLoanBalance(loan, transactionsDB, userId, asOfDate = null, prefetchedTxns = null) {
     try {
-      const result = await transactionsDB.allDocs({
-        include_docs: true,
-        startkey: `txn:${userId}:`,
-        endkey:   `txn:${userId}:\uffff`
-      });
+      let allTxns = prefetchedTxns;
+      if (!allTxns) {
+        const result = await transactionsDB.allDocs({
+          include_docs: true,
+          startkey: `txn:${userId}:`,
+          endkey:   `txn:${userId}:\uffff`
+        });
+        allTxns = result.rows.map(r => r.doc);
+      }
 
       const asOf = this._dateOnly(asOfDate) || new Date();
       const effectivePhase = this._effectiveLoanPhase(loan, asOf);
-      const loanTxns = result.rows.map(r => r.doc)
+      const loanTxns = allTxns
         .filter(d =>
           d.type === 'transaction' &&
           d.user_id === userId &&
@@ -1816,6 +1812,7 @@ export const ObligationsEngine = {
       let accruedInterest = 0;
       let interestPaid = 0;
       let principalPaid = 0;
+      const interestPaidByFY = {};
 
       const startDate = this._dateOnly(loan.start_date)
         || this._dateOnly(loan.created)
@@ -1837,8 +1834,12 @@ export const ObligationsEngine = {
         }))
       ].filter(event => event.date && event.date <= asOf);
 
-      for (let accrualDate = this._addMonths(startDate, 1); accrualDate <= asOf; accrualDate = this._addMonths(accrualDate, 1)) {
-        events.push({ type: 'accrual', date: new Date(accrualDate), amount: 0 });
+      // Anchor each accrual to the start date's day-of-month (index-based,
+      // so a clamped Feb 28 doesn't drag every later month back to the 28th).
+      for (let i = 1; i <= 1200; i++) {
+        const accrualDate = this._addMonths(startDate, i);
+        if (accrualDate > asOf) break;
+        events.push({ type: 'accrual', date: accrualDate, amount: 0 });
       }
 
       events.sort((a, b) => {
@@ -1881,6 +1882,10 @@ export const ObligationsEngine = {
           outstandingInterest = Math.max(0, outstandingInterest - interestComponent);
           interestPaid += interestComponent;
           principalPaid += principalComponent;
+          if (interestComponent > 0) {
+            const fy = this._fyKey(event.date);
+            interestPaidByFY[fy] = (interestPaidByFY[fy] || 0) + interestComponent;
+          }
           balance = Math.max(0, balance - payment);
         }
       }
@@ -1891,11 +1896,33 @@ export const ObligationsEngine = {
       // Next due date is only a repayment-cycle EMI date. During moratorium,
       // show the moratorium end date as the next milestone instead.
       let nextDueDate = loan.moratorium_end || null;
+      let emiStatus = null;
+      let emiDaysOverdue = 0;
       if (effectivePhase === 'repayment') {
         const basisDate = this._dateOnly(asOf) || new Date();
-        let nextDue = new Date(basisDate.getFullYear(), basisDate.getMonth(), loan.emi_day || 5);
-        if (nextDue < basisDate) nextDue = new Date(basisDate.getFullYear(), basisDate.getMonth() + 1, loan.emi_day || 5);
+        const dueDay = Math.min(31, Math.max(1, Number(loan.emi_day) || 5));
+        const dueThisMonth = this._clampDay(basisDate.getFullYear(), basisDate.getMonth(), dueDay);
+        const nextDue = dueThisMonth < basisDate
+          ? this._clampDay(basisDate.getFullYear(), basisDate.getMonth() + 1, dueDay)
+          : dueThisMonth;
         nextDueDate = this._formatDateOnly(nextDue);
+
+        // Current-cycle EMI status — has a payment been logged this month?
+        if ((Number(loan.emi) || 0) > 0 && balance > 0.01) {
+          const monthStart = new Date(basisDate.getFullYear(), basisDate.getMonth(), 1);
+          const paidThisCycle = payments.some(t => {
+            const d = this._dateOnly(t.date);
+            return d && d >= monthStart;
+          });
+          if (paidThisCycle) {
+            emiStatus = 'paid';
+          } else if (basisDate >= dueThisMonth) {
+            emiStatus = 'overdue';
+            emiDaysOverdue = Math.round((basisDate - dueThisMonth) / 86400000);
+          } else {
+            emiStatus = 'pending';
+          }
+        }
       }
 
       return {
@@ -1904,11 +1931,14 @@ export const ObligationsEngine = {
         totalPaid,
         principalPaid,
         interestPaid,
+        interestPaidByFY,
         accruedInterest,
         outstandingInterest,
         capitalizedInterest:  outstandingInterest,
         nextInterestDue,
         nextDueDate,
+        emiStatus,
+        emiDaysOverdue,
         phase:               effectivePhase,
         storedPhase:         loan.phase || 'moratorium',
         transactionCount:    loanTxns.length
@@ -1917,63 +1947,178 @@ export const ObligationsEngine = {
     } catch (err) {
       console.error('ObligationsEngine.getLoanBalance error:', err);
       return { outstanding: loan.disbursed_amount || 0, totalDrawn: 0, totalPaid: 0,
-               principalPaid: 0, interestPaid: 0, nextInterestDue: 0,
-               nextDueDate: null, phase: loan.phase || 'moratorium', transactionCount: 0 };
+               principalPaid: 0, interestPaid: 0, interestPaidByFY: {}, nextInterestDue: 0,
+               nextDueDate: null, emiStatus: null, emiDaysOverdue: 0,
+               phase: loan.phase || 'moratorium', transactionCount: 0,
+               unverified: true };
     }
   },
 
   // ── getLoanProjection ─────────────────────────────────────
   // Projects the full repayment schedule from a given outstanding
-  // balance. Used for displaying payoff date and total interest.
+  // balance. Moratorium-phase loans capitalize interest month by
+  // month until moratorium_end, then amortize from the inflated
+  // balance — so education-loan holders can see the true payoff path.
+  //
+  // options:
+  //   prepayNow    — lump sum applied to the balance immediately
+  //   extraMonthly — amount added to every EMI during repayment
   //
   // Returns:
-  //   schedule[]    — array of { month, emi, principal, interest, balance }
-  //   payoffDate    — projected YYYY-MM when loan is fully paid
-  //   totalRemInterest   — total interest remaining
-  //   totalRemPrincipal  — total principal remaining
-  getLoanProjection(loan, currentOutstanding) {
-    const effectivePhase = this._effectiveLoanPhase(loan);
-    if (!loan.emi || loan.emi <= 0 || effectivePhase !== 'repayment') {
-      // Moratorium phase — can't project without EMI
-      return { schedule: [], payoffDate: null, totalRemInterest: 0, totalRemPrincipal: currentOutstanding, unpayable: false };
+  //   schedule[]   — { month, emi, principal, interest, balance, phase }
+  //   payoffDate   — projected YYYY-MM when loan is fully paid
+  //   totalRemInterest / totalRemPrincipal
+  //   moratoriumMonths / balanceAtRepaymentStart (when applicable)
+  //   unpayable + minimumEmi — EMI doesn't cover monthly interest
+  //   needsEmi     — no EMI and no tenure to derive one from
+  //   indeterminate — moratorium with no end date declared
+  getLoanProjection(loan, currentOutstanding, options = {}) {
+    const prepayNow    = Math.max(0, Number(options.prepayNow)    || 0);
+    const extraMonthly = Math.max(0, Number(options.extraMonthly) || 0);
+    const today          = this._dateOnly(new Date());
+    const effectivePhase = this._effectiveLoanPhase(loan, today);
+    const moratoriumEnd  = this._dateOnly(loan.moratorium_end);
+
+    let   balance    = Math.max(0, (Number(currentOutstanding) || 0) - prepayNow);
+    const schedule   = [];
+    const MAX_MONTHS = 600; // 50 years hard cap
+    let   monthIndex = 0;
+
+    const baseResult = {
+      schedule, payoffDate: null, totalRemInterest: 0,
+      totalRemPrincipal: balance, unpayable: false,
+      moratoriumMonths: 0, balanceAtRepaymentStart: balance
+    };
+
+    if (balance <= 0.01) return { ...baseResult, payoffDate: this._monthKey(today) };
+
+    if (effectivePhase === 'moratorium' && !moratoriumEnd) {
+      // No end date — can't know when repayment starts.
+      return { ...baseResult, indeterminate: true };
     }
 
-    let   balance     = currentOutstanding;
-    const schedule    = [];
-    let   month       = new Date();
-    let   iterations  = 0;
-    const MAX_MONTHS  = 600; // 50 years hard cap
+    // Phase 1 — moratorium: interest capitalizes, nothing is repaid.
+    if (effectivePhase === 'moratorium') {
+      while (monthIndex < MAX_MONTHS) {
+        const month = this._addMonths(today, monthIndex);
+        if (month >= moratoriumEnd) break;
+        const rate     = this._rateForDate(loan, month);
+        const interest = balance * (rate / 100 / 12);
+        balance += interest;
+        schedule.push({
+          month: this._monthKey(month), emi: 0, principal: 0,
+          interest, balance, rate, phase: 'moratorium'
+        });
+        monthIndex++;
+      }
+    }
 
-    while (balance > 0.01 && iterations < MAX_MONTHS) {
-      const monthlyRate = this._rateForDate(loan, month) / 100 / 12;
-      const interest  = balance * monthlyRate;
-      if (monthlyRate > 0 && interest >= loan.emi) {
+    const moratoriumMonths        = monthIndex;
+    const balanceAtRepaymentStart = balance;
+
+    // EMI: declared, or derived from tenure for moratorium planning.
+    let emi = Number(loan.emi) || 0;
+    if (emi <= 0 && Number(loan.tenure_months) > 0) {
+      const startRate = this._rateForDate(loan, this._addMonths(today, monthIndex));
+      emi = this.calculateLoanEmi(balance, startRate, loan.tenure_months);
+    }
+    if (emi <= 0) {
+      return { ...baseResult, moratoriumMonths, balanceAtRepaymentStart, needsEmi: true };
+    }
+    emi += extraMonthly;
+
+    // Phase 2 — repayment amortization.
+    while (balance > 0.01 && monthIndex < MAX_MONTHS) {
+      const month       = this._addMonths(today, monthIndex);
+      const rate        = this._rateForDate(loan, month);
+      const monthlyRate = rate / 100 / 12;
+      const interest    = balance * monthlyRate;
+      if (monthlyRate > 0 && interest >= emi) {
         return {
           schedule,
           payoffDate: null,
           totalRemInterest: schedule.reduce((s, r) => s + r.interest, 0),
           totalRemPrincipal: balance,
           unpayable: true,
-          minimumEmi: interest + 0.01
+          minimumEmi: interest + 0.01,
+          moratoriumMonths,
+          balanceAtRepaymentStart
         };
       }
-      const principal = Math.min(Math.max(0, loan.emi - interest), balance);
-      balance         = Math.max(0, balance + interest - loan.emi);
-
-      const monthStr = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
-      schedule.push({ month: monthStr, emi: loan.emi, principal, interest, balance, rate: this._rateForDate(loan, month) });
-
-      month.setMonth(month.getMonth() + 1);
-      iterations++;
+      const principal = Math.min(Math.max(0, emi - interest), balance);
+      balance         = Math.max(0, balance + interest - emi);
+      schedule.push({
+        month: this._monthKey(month),
+        emi: principal + interest === 0 ? emi : Math.min(emi, principal + interest),
+        principal, interest, balance, rate, phase: 'repayment'
+      });
+      monthIndex++;
     }
 
     const totalRemInterest  = schedule.reduce((s, r) => s + r.interest,  0);
     const totalRemPrincipal = schedule.reduce((s, r) => s + r.principal, 0);
-    const payoffDate        = schedule.length > 0 ? schedule[schedule.length - 1].month : null;
+    const repayRows         = schedule.filter(r => r.phase === 'repayment');
+    const payoffDate        = repayRows.length > 0 ? repayRows[repayRows.length - 1].month : null;
 
-    return { schedule, payoffDate, totalRemInterest, totalRemPrincipal, unpayable: false };
+    return {
+      schedule, payoffDate, totalRemInterest, totalRemPrincipal,
+      unpayable: false, moratoriumMonths, balanceAtRepaymentStart,
+      projectedEmi: emi
+    };
   },
 
+
+  // ── _fetchUserTxns ────────────────────────────────────────
+  // Single fetch of a user's transactions, shared by the balance
+  // calculators so getSummary doesn't re-read the store per loan/EMI.
+  async _fetchUserTxns(transactionsDB, userId) {
+    const result = await transactionsDB.allDocs({
+      include_docs: true,
+      startkey: `txn:${userId}:`,
+      endkey:   `txn:${userId}:￿`
+    });
+    return result.rows.map(r => r.doc)
+      .filter(d => d && d.type === 'transaction' && d.user_id === userId);
+  },
+
+  // ── getLoanTransactions ───────────────────────────────────
+  // All drawdowns and payments tagged to a loan, newest first.
+  async getLoanTransactions(loanId, transactionsDB, userId) {
+    try {
+      const txns = await this._fetchUserTxns(transactionsDB, userId);
+      return txns
+        .filter(d => d.loan_id === loanId &&
+          (d.category === 'Loan Drawdown' || d.category === 'Loan Payment'))
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    } catch { return []; }
+  },
+
+  // ── deleteLoanTransaction ─────────────────────────────────
+  // Removes a logged drawdown/payment. Drawdowns that incremented the
+  // loan's disbursed_amount (counted_in_disbursed !== false — legacy
+  // txns without the flag are assumed counted) are reversed on the
+  // loan document so the declared total stays consistent.
+  async deleteLoanTransaction(txnId, transactionsDB, metadataDB, userId) {
+    try {
+      const txn = await transactionsDB.get(txnId);
+      if (txn.user_id !== userId) return { ok: false, error: 'Unauthorised' };
+
+      if (txn.category === 'Loan Drawdown' && txn.loan_id && txn.counted_in_disbursed !== false) {
+        try {
+          const loan = await metadataDB.get(txn.loan_id);
+          if (loan.user_id === userId) {
+            loan.disbursed_amount = Math.max(0,
+              (Number(loan.disbursed_amount) || 0) - Math.abs(Number(txn.amount) || 0));
+            loan.updated = new Date().toISOString();
+            await metadataDB.put(loan);
+          }
+        } catch { /* loan already discharged — txn removal still valid */ }
+      }
+
+      await transactionsDB.remove(txn);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
 
   // ═══════════════════════════════════════════════════════════
   // SECTION 3 — EMI PURCHASES
@@ -2119,18 +2264,12 @@ export const ObligationsEngine = {
     } catch (err) { return { ok: false, error: err.message }; }
   },
 
-  async getEMIBalance(emi, transactionsDB, userId) {
+  async getEMIBalance(emi, transactionsDB, userId, prefetchedTxns = null) {
     try {
-      const result = await transactionsDB.allDocs({
-        include_docs: true,
-        startkey: `txn:${userId}:`,
-        endkey:   `txn:${userId}:\uffff`
-      });
+      const allTxns = prefetchedTxns || await this._fetchUserTxns(transactionsDB, userId);
 
-      const emiTxns = result.rows.map(r => r.doc)
+      const emiTxns = allTxns
         .filter(d =>
-          d.type === 'transaction' &&
-          d.user_id === userId &&
           d.emi_id === emi._id &&
           d.category === 'EMI Payment'
         )
@@ -2244,9 +2383,14 @@ export const ObligationsEngine = {
         this.getEMIs(metadataDB, userId)
       ]);
 
+      // One transaction fetch shared across every loan/EMI balance pass.
+      const allTxns = (loans.length > 0 || emis.length > 0)
+        ? await this._fetchUserTxns(transactionsDB, userId)
+        : [];
+
       const [loanBalances, emiBalances] = await Promise.all([
-        Promise.all(loans.map(l => this.getLoanBalance(l, transactionsDB, userId))),
-        Promise.all(emis.map(e => this.getEMIBalance(e, transactionsDB, userId)))
+        Promise.all(loans.map(l => this.getLoanBalance(l, transactionsDB, userId, null, allTxns))),
+        Promise.all(emis.map(e => this.getEMIBalance(e, transactionsDB, userId, allTxns)))
       ]);
 
       const loansWithBalance = loans.map((l, i) => ({

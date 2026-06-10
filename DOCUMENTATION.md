@@ -365,13 +365,15 @@ A standalone Python script designed to run as a long-lived background service (e
 
 **What it does on each run:**
 
-1. **Monthly archival check** — If no snapshot exists for the previous month, it reads the current `finance:investments:current:{userId}` manifest and writes a `finance:investments:snapshot:{userId}:{YYYY-MM}` document.
+1. **User discovery** — Scans `investments_vault` for every `finance:investments:current:{userId}` manifest, so it sweeps **all** users — existing and any added later — with no config change.
 
-2. **Dual-source price fetch:**
-   - **Indian Mutual Funds** — Fetches `NAVAll.txt` from AMFI ([amfiindia.com](https://www.amfiindia.com/spages/NAVAll.txt)) and resolves scheme codes via the `ALIAS_MATRIX` lookup table.
-   - **NSE Equities** — Fetches live prices via `yfinance`, automatically appending `.NS` for NSE-listed stocks.
+2. **Monthly archival check** — For each user, if no snapshot exists for the previous month, it reads that user's manifest and writes a `finance:investments:snapshot:{userId}:{YYYY-MM}` document.
 
-3. **Price update commit** — If any asset price has changed, it updates the manifest document in CouchDB and records `last_updated`.
+3. **Dual-source price fetch (deduplicated across the union of all holdings):**
+   - **Indian Mutual Funds** — Fetches `NAVAll.txt` from AMFI ([amfiindia.com](https://www.amfiindia.com/spages/NAVAll.txt)) **once** and resolves scheme codes via the `ALIAS_MATRIX` lookup table.
+   - **NSE Equities** — Fetches each **unique** ticker once via `yfinance`, automatically appending `.NS` for NSE-listed stocks.
+
+4. **Price update commit** — Applies the shared price map to each user and writes back only the manifests whose prices changed, recording `last_updated`.
 
 #### The ALIAS_MATRIX
 
@@ -398,7 +400,7 @@ ALIAS_MATRIX = {
 | `COUCH_HOST` | `http://localhost:5984` | CouchDB server URL |
 | `COUCH_USER` | *(required)* | CouchDB admin username |
 | `COUCH_PASS` | *(required)* | CouchDB admin password |
-| `COUCH_APP_USER` | `Sanguinius` | App user ID (must match the username entered at the boot screen) |
+| `COUCH_APP_USER` | *(unset)* | Optional. Restrict the sweep to a single user ID (handy for debugging). Leave unset to update **all** users. |
 
 **`.env` file support:** Create a `.env` file in the same directory as the script to avoid setting environment variables manually every run.
 
@@ -406,7 +408,7 @@ ALIAS_MATRIX = {
 COUCH_HOST=http://localhost:5984
 COUCH_USER=admin
 COUCH_PASS=yourpassword
-COUCH_APP_USER=Sanguinius
+# COUCH_APP_USER=Sanguinius   # optional — restrict to one user; unset sweeps all users
 ```
 
 **Systemd service setup (Raspberry Pi):**

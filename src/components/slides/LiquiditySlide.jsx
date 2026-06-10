@@ -29,6 +29,7 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
   const [activeCardId,  setActiveCardId]  = useState('');
   const [localBuckets,  setLocalBuckets]  = useState([]);
   const [localCardInfo, setLocalCardInfo] = useState({});
+  const [localCredit,   setLocalCredit]   = useState(0);
   const [isManaging,    setIsManaging]    = useState(false);
 
   useEffect(() => {
@@ -43,11 +44,13 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
       if (!dbTransactions || !dbMetadata || !activeCardId) {
         setLocalBuckets(data?.cardObligations?.buckets || []);
         setLocalCardInfo(data?.cardObligations?.card   || {});
+        setLocalCredit(data?.cardObligations?.creditBalance || 0);
         return;
       }
       const res = await CardEngine.buildBuckets(dbTransactions, dbMetadata, userId, activeCardId);
       setLocalBuckets(res.buckets || []);
       setLocalCardInfo(res.card   || {});
+      setLocalCredit(res.creditBalance || 0);
     };
     fetchBuckets();
   }, [activeCardId, data, dbTransactions, dbMetadata, userId]);
@@ -109,9 +112,13 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
   const daysRemaining   = dueDate
     ? Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : '--';
   const isCritical      = daysRemaining !== '--' && daysRemaining <= 5;
-  const totalPendingDebt = localBuckets.reduce((acc, b) => acc + b.outstanding, 0);
+  const totalOutstanding = localBuckets.reduce((acc, b) => acc + b.outstanding, 0);
+  // Net position: outstanding debt minus any prepayment credit. Goes
+  // negative when the card is prepaid (paid beyond all billed debt).
+  const netDebt          = totalOutstanding - localCredit;
+  const isPrepaid        = netDebt < 0;
   const limitPct        = localCardInfo.limit
-    ? Math.min(100, (totalPendingDebt / localCardInfo.limit) * 100) : 0;
+    ? Math.min(100, (Math.max(0, netDebt) / localCardInfo.limit) * 100) : 0;
   const isLimitCritical = limitPct >= 80;
 
   const fmtLimit = (v) => !v ? '--'
@@ -422,9 +429,15 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                   </div>
                   <div style={{ borderTop: '1px dashed var(--ba-border-lo)', paddingTop: '10px', marginTop: '2px' }}>
                     <div className="row" style={{ padding: 0 }}>
-                      <span className="rl" style={{ fontSize: '13px', color: 'var(--ba-gold-dim)' }}>TOTAL PENDING DEBT</span>
-                      <span className="rv warn" style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                        <ScrambleText text={totalPendingDebt.toLocaleString()} />
+                      <span className="rl" style={{ fontSize: '13px', color: 'var(--ba-gold-dim)' }}>
+                        {isPrepaid ? 'PREPAID CREDIT' : 'TOTAL PENDING DEBT'}
+                      </span>
+                      <span className="rv" style={{
+                        fontSize: '16px', fontWeight: 'bold',
+                        color: isPrepaid ? 'var(--ba-gold)' : 'var(--ba-crimson)',
+                        textShadow: isPrepaid ? '0 0 8px rgba(201,168,76,0.5)' : 'none',
+                      }}>
+                        <ScrambleText text={`${isPrepaid ? '+' : ''}${Math.abs(netDebt).toLocaleString()}`} />
                       </span>
                     </div>
                     {localCardInfo.limit > 0 && (
@@ -497,9 +510,15 @@ const LiquiditySlide = ({ data, dbTransactions, dbMetadata, userId }) => {
                     )) : (
                       <tr>
                         <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>
-                          <span className="blink" style={{ color: 'var(--border-hi)' }}>
-                            // ZERO BLOOD DEBT DETECTED // PRAISE THE OMNISSIAH //
-                          </span>
+                          {isPrepaid ? (
+                            <span style={{ color: 'var(--ba-gold)', textShadow: '0 0 8px rgba(201,168,76,0.5)' }}>
+                              // TITHE PAID IN ADVANCE // CREDIT OF +{localCredit.toLocaleString()} HELD //
+                            </span>
+                          ) : (
+                            <span className="blink" style={{ color: 'var(--border-hi)' }}>
+                              // ZERO BLOOD DEBT DETECTED // PRAISE THE OMNISSIAH //
+                            </span>
+                          )}
                         </td>
                       </tr>
                     )}

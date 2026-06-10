@@ -15,7 +15,7 @@ const PersistentUI = ({ data, children, currentTab, onTabChange }) => {
   const headerItems = [
     { label: "NET_POSITION", val: metrics.netIncome },
     { label: "BANK_RESERVE", val: buckets.Bank },
-    { label: "DEBT_LOAD", val: Math.abs(buckets.Card || 0) }
+    { label: (buckets.Card || 0) < 0 ? "CARD_CREDIT" : "DEBT_LOAD", val: Math.abs(buckets.Card || 0) }
   ];
 
   return (

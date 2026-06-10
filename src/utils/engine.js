@@ -393,6 +393,10 @@ export const CardEngine = {
         .filter(d => d.category === 'Credit Card Payment' && this._isThisCard(d, card))
         .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
+      // First pass — date-aware allocation: a payment settles buckets
+      // due on or after the payment date. Anything it can't place is
+      // held back in the credit pool rather than discarded.
+      let creditPool = 0;
       payments.forEach(pmt => {
         const pmtDate = (pmt.date || '').substring(0, 10);
         let rem = Math.abs(pmt.amount);
@@ -405,7 +409,24 @@ export const CardEngine = {
           b.paid += apply;
           rem    -= apply;
         }
+        creditPool += rem;
       });
+
+      // Second pass — the pooled overflow pays down any still-open
+      // bucket oldest-first, so a late payment still clears its overdue
+      // cycle instead of leaving debt and a credit showing at once.
+      // Whatever survives is genuine prepayment: money paid beyond all
+      // billed debt, surfaced as a positive credit balance.
+      for (const key of sortedKeys) {
+        if (creditPool <= 0) break;
+        const b   = buckets[key];
+        const due = b.total - b.paid;
+        if (due <= 0) continue;
+        const apply = Math.min(creditPool, due);
+        b.paid     += apply;
+        creditPool -= apply;
+      }
+      const creditBalance = creditPool;
 
       const today        = new Date().toISOString().substring(0, 10);
       const finalBuckets = sortedKeys.map(key => {
@@ -415,7 +436,7 @@ export const CardEngine = {
         return { ...b, outstanding, status };
       });
 
-      return { card, buckets: finalBuckets };
+      return { card, buckets: finalBuckets, creditBalance };
 
     } catch (err) { return { error: err.message }; }
   }

@@ -140,7 +140,7 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
   const financialItems = [
     { label: 'NET POSITION', val: metrics.netIncome || 0 },
     { label: 'BANK RESERVE', val: buckets.Bank      || 0 },
-    { label: 'DEBT LOAD',    val: Math.abs(buckets.Card || 0) },
+    { label: (buckets.Card || 0) < 0 ? 'CARD CREDIT' : 'DEBT LOAD', val: Math.abs(buckets.Card || 0) },
   ];
 
   const tickerItems = [];

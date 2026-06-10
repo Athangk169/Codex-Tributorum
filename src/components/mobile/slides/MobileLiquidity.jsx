@@ -10,6 +10,7 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
   const [activeCardId, setActiveCardId] = useState('');
   const [localBuckets, setLocalBuckets] = useState([]);
   const [localCardInfo, setLocalCardInfo] = useState({});
+  const [localCredit, setLocalCredit] = useState(0);
   const [isManaging, setIsManaging] = useState(false);
   const [showCardSelect, setShowCardSelect] = useState(false);
 
@@ -27,11 +28,13 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
       if (!dbTransactions || !dbMetadata || !activeCardId) {
         setLocalBuckets(data?.cardObligations?.buckets || []);
         setLocalCardInfo(data?.cardObligations?.card || {});
+        setLocalCredit(data?.cardObligations?.creditBalance || 0);
         return;
       }
       const res = await CardEngine.buildBuckets(dbTransactions, dbMetadata, userId, activeCardId);
       setLocalBuckets(res.buckets || []);
       setLocalCardInfo(res.card || {});
+      setLocalCredit(res.creditBalance || 0);
     };
     fetchBuckets();
   }, [activeCardId, data, dbTransactions, dbMetadata, userId]);
@@ -98,8 +101,12 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
     ? Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
     : '--';
   const isCritical = daysRemaining !== '--' && daysRemaining <= 5;
-  const totalPendingDebt = localBuckets.reduce((acc, b) => acc + b.outstanding, 0);
-  const limitPct = localCardInfo.limit ? Math.min(100, (totalPendingDebt / localCardInfo.limit) * 100) : 0;
+  const totalOutstanding = localBuckets.reduce((acc, b) => acc + b.outstanding, 0);
+  // Net position: outstanding debt minus prepayment credit. Negative
+  // when the card is prepaid (paid beyond all billed debt).
+  const netDebt = totalOutstanding - localCredit;
+  const isPrepaid = netDebt < 0;
+  const limitPct = localCardInfo.limit ? Math.min(100, (Math.max(0, netDebt) / localCardInfo.limit) * 100) : 0;
   const isLimitCritical = limitPct >= 80;
 
   const activeCard = cards.find(c => c._id === activeCardId);
@@ -361,9 +368,15 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                 <span className="rv">{localCardInfo.limit ? localCardInfo.limit.toLocaleString() : 'UNSET'}</span>
               </div>
               <div className="row" style={{ padding: 0, marginTop: '6px', borderTop: '1px dashed var(--ba-border-lo)', paddingTop: '10px' }}>
-                <span className="rl" style={{ fontSize: '12px', color: 'var(--ba-gold-dim)' }}>TOTAL PENDING DEBT</span>
-                <span className="rv warn" style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                  <ScrambleText text={totalPendingDebt.toLocaleString()} />
+                <span className="rl" style={{ fontSize: '12px', color: 'var(--ba-gold-dim)' }}>
+                  {isPrepaid ? 'PREPAID CREDIT' : 'TOTAL PENDING DEBT'}
+                </span>
+                <span className="rv" style={{
+                  fontSize: '16px', fontWeight: 'bold',
+                  color: isPrepaid ? 'var(--ba-gold)' : 'var(--ba-crimson)',
+                  textShadow: isPrepaid ? '0 0 8px rgba(201,168,76,0.5)' : 'none',
+                }}>
+                  <ScrambleText text={`${isPrepaid ? '+' : ''}${Math.abs(netDebt).toLocaleString()}`} />
                 </span>
               </div>
 
@@ -427,6 +440,10 @@ const MobileLiquidity = ({ data, dbTransactions, dbMetadata, userId }) => {
                     </div>
                   </div>
                 ))
+              ) : isPrepaid ? (
+                <div style={{ textAlign: 'center', padding: '20px', fontSize: '11px', color: 'var(--ba-gold)', textShadow: '0 0 8px rgba(201,168,76,0.5)', border: '1px dashed var(--ba-border-lo)' }}>
+                  <ScrambleText text={`// CREDIT +${localCredit.toLocaleString()} HELD IN ADVANCE //`} />
+                </div>
               ) : (
                 <div style={{ textAlign: 'center', padding: '20px', fontSize: '11px', color: 'var(--text-d)', border: '1px dashed var(--ba-border-lo)' }}>
                   <ScrambleText text="// ZERO BLOOD DEBT DETECTED //" />

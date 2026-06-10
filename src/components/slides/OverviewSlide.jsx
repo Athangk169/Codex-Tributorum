@@ -485,6 +485,9 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   const upcomingBuckets = (data?.cardObligations?.allBuckets || []).filter(b => b.status !== 'paid');
   const cardTotal       = data?.totalDebt ?? (buckets.Card || 0);
   const totalCardDebt   = cardTotal;
+  // A net-prepaid card carries a credit — negative debt.
+  const isNetCredit     = totalCardDebt < 0;
+  const debtMagnitude   = Math.abs(totalCardDebt);
 
   const liquidReserve  = bankTotal + cashTotal;
   const netPosition    = liquidReserve - cardTotal;
@@ -702,11 +705,23 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
               <div className="ov-ttl">OBLIGATIONS</div>
               {upcomingBuckets.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                  <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>BLOOD DEBT</div>
-                  <div className="ov-debt-ok" style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                    <ScrambleText text="0" />
-                  </div>
-                  <div className="ov-kpi-sub" style={{ marginTop: '4px' }}>NO DEBT DETECTED</div>
+                  {isNetCredit ? (
+                    <>
+                      <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>PREPAID CREDIT</div>
+                      <div style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'var(--mono)', color: 'var(--ba-gold)', textShadow: '0 0 8px rgba(201,168,76,0.5)' }}>
+                        <ScrambleText text={`+${debtMagnitude.toLocaleString()}`} />
+                      </div>
+                      <div className="ov-kpi-sub" style={{ marginTop: '4px' }}>TITHE PAID IN ADVANCE</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="ov-kpi-lbl" style={{ color: 'var(--ba-gold-dim)', marginBottom: '6px' }}>BLOOD DEBT</div>
+                      <div className="ov-debt-ok" style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
+                        <ScrambleText text="0" />
+                      </div>
+                      <div className="ov-kpi-sub" style={{ marginTop: '4px' }}>NO DEBT DETECTED</div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <>
@@ -736,9 +751,14 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                   </div>
                   <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, #4a0a00, transparent)', margin: '8px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <span className="ov-kpi-lbl" style={{ color: '#cc2200' }}>BLOOD DEBT</span>
-                    <span className="ov-debt-warn glitch-crit" style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>
-                      <ScrambleText text={totalCardDebt.toLocaleString()} />
+                    <span className="ov-kpi-lbl" style={{ color: isNetCredit ? 'var(--ba-gold-dim)' : '#cc2200' }}>
+                      {isNetCredit ? 'NET CREDIT' : 'BLOOD DEBT'}
+                    </span>
+                    <span
+                      className={isNetCredit ? '' : 'ov-debt-warn glitch-crit'}
+                      style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'var(--mono)', color: isNetCredit ? 'var(--ba-gold)' : undefined, textShadow: isNetCredit ? '0 0 8px rgba(201,168,76,0.5)' : undefined }}
+                    >
+                      <ScrambleText text={isNetCredit ? `+${debtMagnitude.toLocaleString()}` : totalCardDebt.toLocaleString()} />
                     </span>
                   </div>
                 </>

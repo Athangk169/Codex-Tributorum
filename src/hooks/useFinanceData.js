@@ -326,7 +326,13 @@ export const useFinanceData = (credentials) => {
           .sort((a, b) => a.due_date.localeCompare(b.due_date))
           .map(b => ({ ...b, status: b.due_date < todayIso ? 'overdue' : 'outstanding' }));
 
-        const aggregateDebt = allBuckets.reduce((s, b) => s + b.outstanding, 0);
+        // Net card position: billed dues across all cards minus any
+        // prepayment credit. Goes negative when cards are net prepaid,
+        // so a credit balance (negative debt) propagates to every KPI
+        // that reads data.totalDebt.
+        const grossDebt     = allBuckets.reduce((s, b) => s + b.outstanding, 0);
+        const totalCredit   = allCardResults.reduce((s, r) => s + (r?.creditBalance || 0), 0);
+        const aggregateDebt = grossDebt - totalCredit;
 
         const cardObligationsCombined = {
           ...(cardResults || {}),

@@ -506,6 +506,9 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
   const cardTotal       = data?.totalDebt ?? (buckets.Card || 0);
   const totalDebt       = cardTotal;
   const totalCardDebt   = cardTotal;
+  // A net-prepaid card carries a credit — negative debt.
+  const isNetCredit     = totalCardDebt < 0;
+  const debtMagnitude   = Math.abs(totalCardDebt);
 
   // Three distinct financial views — matching desktop
   const liquidReserve  = bank + cash;
@@ -616,8 +619,8 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
             <span style={{ color: '#4a2010' }}>
               BANK {bank > 0 ? `${bank.toLocaleString()}` : '—'} · CASH {cash > 0 ? `${cash.toLocaleString()}` : '—'} ·{' '}
             </span>
-            <span style={{ color: totalDebt > 0 ? '#cc2200' : '#4a2010' }}>
-              DEBT {totalDebt > 0 ? `${totalDebt.toLocaleString()}` : 'NONE'}
+            <span style={{ color: totalDebt > 0 ? '#cc2200' : totalDebt < 0 ? '#c9a84c' : '#4a2010' }}>
+              {totalDebt < 0 ? `CREDIT ${Math.abs(totalDebt).toLocaleString()}` : `DEBT ${totalDebt > 0 ? totalDebt.toLocaleString() : 'NONE'}`}
             </span>
           </div>
         </div>
@@ -700,15 +703,31 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
           <div className="mo-ttl">IMPENDING OBLIGATIONS</div>
           {upcomingBuckets.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '6px 0' }}>
-              <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
-                BLOOD DEBT
-              </div>
-              <div className="mo-val ov-debt-ok" style={{ fontSize: '26px' }}>
-                <ScrambleText text="0" />
-              </div>
-              <div style={{ fontSize: '9px', color: '#b8923e', letterSpacing: '2px', marginTop: '4px' }}>
-                NO DEBT DETECTED
-              </div>
+              {isNetCredit ? (
+                <>
+                  <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
+                    PREPAID CREDIT
+                  </div>
+                  <div className="mo-val" style={{ fontSize: '26px', color: 'var(--ba-gold)', textShadow: '0 0 8px rgba(201,168,76,0.5)' }}>
+                    <ScrambleText text={`+${debtMagnitude.toLocaleString()}`} />
+                  </div>
+                  <div style={{ fontSize: '9px', color: '#b8923e', letterSpacing: '2px', marginTop: '4px' }}>
+                    TITHE PAID IN ADVANCE
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: '9px', color: '#b8923e', marginBottom: '4px', letterSpacing: '2px' }}>
+                    BLOOD DEBT
+                  </div>
+                  <div className="mo-val ov-debt-ok" style={{ fontSize: '26px' }}>
+                    <ScrambleText text="0" />
+                  </div>
+                  <div style={{ fontSize: '9px', color: '#b8923e', letterSpacing: '2px', marginTop: '4px' }}>
+                    NO DEBT DETECTED
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -737,9 +756,14 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
               </div>
               <div className="mo-divider" />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{ fontSize: '9px', color: '#cc2200', letterSpacing: '2px' }}>BLOOD DEBT</span>
-                <span className="mo-val ov-debt-warn glitch-crit" style={{ fontSize: '22px' }}>
-                  <ScrambleText text={totalCardDebt.toLocaleString()} />
+                <span style={{ fontSize: '9px', color: isNetCredit ? '#b8923e' : '#cc2200', letterSpacing: '2px' }}>
+                  {isNetCredit ? 'NET CREDIT' : 'BLOOD DEBT'}
+                </span>
+                <span
+                  className={isNetCredit ? 'mo-val' : 'mo-val ov-debt-warn glitch-crit'}
+                  style={{ fontSize: '22px', color: isNetCredit ? 'var(--ba-gold)' : undefined, textShadow: isNetCredit ? '0 0 8px rgba(201,168,76,0.5)' : undefined }}
+                >
+                  <ScrambleText text={isNetCredit ? `+${debtMagnitude.toLocaleString()}` : totalCardDebt.toLocaleString()} />
                 </span>
               </div>
             </>

@@ -1,6 +1,7 @@
 // src/components/mobile/MobileBootScreen.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { couchLogin } from '../../utils/couchAuth';
+import { saveOfflineVerifier, verifyOfflinePassword, hasOfflineVerifier } from '../../utils/offlineVerifier';
 import ShrineBackdrop from '../layout/ShrineBackdrop';
 
 // ── Shorter, mobile-specific boot sequence ──────────────────────
@@ -132,6 +133,9 @@ const MobileBootScreen = ({ onComplete }) => {
     try {
       await couchLogin(host, cleanUser, cleanPass);
       localStorage.setItem('mech_username', cleanUser);
+      // Refresh the offline verifier so future offline logins are
+      // gated to this (just-validated) password.
+      await saveOfflineVerifier(cleanUser, cleanPass);
       setAuthError('');
       setIsAuthenticating(false);
       setPhase('prompt');
@@ -152,8 +156,11 @@ const MobileBootScreen = ({ onComplete }) => {
         return;
       }
       // No status → network-level failure (DNS, refused, TLS, …).
-      const cachedUser = localStorage.getItem('mech_username');
-      if (cachedUser === cleanUser) {
+      // Offline we can't reach the vault, so verify the password
+      // against the stored verifier from the last successful online
+      // login. A username match alone is NOT enough.
+      const verified = await verifyOfflinePassword(cleanUser, cleanPass);
+      if (verified) {
         setIsOffline(true);
         setAuthError('// WARNING: OFFLINE MODE ENGAGED');
         setTimeout(() => {
@@ -161,8 +168,14 @@ const MobileBootScreen = ({ onComplete }) => {
           setIsAuthenticating(false);
           setPhase('prompt');
         }, 1200);
+      } else if (hasOfflineVerifier(cleanUser)) {
+        // Verifier exists for this user → the password was wrong.
+        setAuthError('// ERROR: CREDENTIALS REJECTED');
+        setIsAuthenticating(false);
       } else {
-        setAuthError('// ERROR: VAULT UNREACHABLE & NO CACHE FOUND');
+        // No verifier → never authenticated online here, nothing to
+        // check against. Don't grant blind offline access.
+        setAuthError('// ERROR: VAULT UNREACHABLE — ONLINE LOGIN REQUIRED ONCE');
         setIsAuthenticating(false);
       }
     }

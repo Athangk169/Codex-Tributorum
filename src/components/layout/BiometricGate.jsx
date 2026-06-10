@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 import { Capacitor } from '@capacitor/core';
+import { clearOfflineVerifier } from '../../utils/offlineVerifier';
 import CrtOverlay from '../shared/CrtOverlay';
 
 // ─────────────────────────────────────────────────────────────
@@ -216,7 +217,11 @@ const BiometricGate = ({ children }) => {
   }, [hadOpened, attemptUnlock]);
 
   const wipeAndContinue = () => {
-    try { localStorage.removeItem(TOKEN_KEY); } catch (_e) {}
+    try {
+      const cachedUser = localStorage.getItem(TOKEN_KEY);
+      if (cachedUser) clearOfflineVerifier(cachedUser);
+      localStorage.removeItem(TOKEN_KEY);
+    } catch (_e) {}
     setPhase('open');
     setHadOpened(true);
   };

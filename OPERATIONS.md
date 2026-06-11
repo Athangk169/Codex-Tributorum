@@ -128,11 +128,19 @@ $userDoc = @{
 $userDoc | curl.exe -sk -u "${u}:${p}" -X PUT "$b/_users/org.couchdb.user:$friend" `
   -H "Content-Type: application/json" -d "@-"
 
-# Add them to members.names on all three DBs
-$members = '{\"members\":{\"roles\":[\"_admin\"],\"names\":[\"test_user\",\"' + $friend + '\"]},\"admins\":{\"roles\":[\"_admin\"]}}'
-curl.exe -sk -u "${u}:${p}" -X PUT "$b/finances/_security"          -H "Content-Type: application/json" -d $members
-curl.exe -sk -u "${u}:${p}" -X PUT "$b/metadata_vault/_security"    -H "Content-Type: application/json" -d $members
-curl.exe -sk -u "${u}:${p}" -X PUT "$b/investments_vault/_security" -H "Content-Type: application/json" -d $members
+# Add them to members.names on all three DBs.
+# NOTE: PUT /_security REPLACES the whole document — fetch the current
+# member list and append, or adding friend #2 silently removes friend #1.
+foreach ($db in @("finances", "metadata_vault", "investments_vault")) {
+  $sec = curl.exe -sk -u "${u}:${p}" "$b/$db/_security" | ConvertFrom-Json
+  $names = @($sec.members.names) + $friend | Select-Object -Unique
+  $body = @{
+    admins  = @{ roles = @("_admin"); names = @() }
+    members = @{ roles = @("_admin"); names = $names }
+  } | ConvertTo-Json -Depth 4
+  $body | curl.exe -sk -u "${u}:${p}" -X PUT "$b/$db/_security" `
+    -H "Content-Type: application/json" -d "@-"
+}
 ```
 
 Give them the username, password, and the APK. On first login the app seeds their
@@ -158,8 +166,9 @@ $user | Add-Member -NotePropertyName _deleted -NotePropertyValue $true -Force
 $user | ConvertTo-Json | curl.exe -sk -u "${u}:${p}" -X PUT "$b/_users/org.couchdb.user:$friend" `
   -H "Content-Type: application/json" -d "@-"
 
-# 3. Remove them from members.names on the three DBs — same pattern as 5b but
-#    drop their name from the list.
+# 3. Remove them from members.names on the three DBs — same loop as 5b, but
+#    filter instead of append:
+#    $names = @($sec.members.names) | Where-Object { $_ -ne $friend }
 ```
 
 Their device still holds a local PouchDB replica with whatever they synced before

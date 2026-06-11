@@ -1,0 +1,2 @@
+# auspex_daemon.py third-party dependencies (stdlib: os, sys, json, time, datetime)
+requests==2.32.*

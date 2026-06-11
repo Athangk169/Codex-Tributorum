@@ -1,0 +1,23 @@
+# Codex Tributorum — same-origin app + CouchDB proxy (SERVER.md §3).
+# TLS is terminated by tailscale serve; Caddy speaks plain HTTP on 8080.
+
+:8080 {
+	# CouchDB under /db — must come before the file server.
+	handle_path /db/* {
+		reverse_proxy couchdb:5984
+	}
+
+	# The app shell. Hashed bundles are immutable; index.html must
+	# revalidate so the service worker sees new deploys promptly.
+	handle {
+		root * /srv/codex/dist
+		encode gzip
+
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		header /index.html Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

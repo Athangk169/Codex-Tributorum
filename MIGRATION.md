@@ -1,5 +1,10 @@
 # CouchDB Migration Plan
 
+> **SUPERSEDED (2026-06-11)** by [SERVER.md](SERVER.md) — the plan changed:
+> dedicated mini-PC instead of Pi, Docker compose stack, replication-based
+> migration, and no live data on external storage (external SSD = backups
+> only). This document is kept for the historical Phase 1 notes.
+
 Two-phase plan for moving the CouchDB data and (eventually) the host machine.
 
 - **Phase 1** — move CouchDB's data directory to an **external SSD on the same

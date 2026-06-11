@@ -1,0 +1,66 @@
+# Codex Tributorum server stack — see SERVER.md §3.
+# Everything admin-facing is reached over the tailnet only (ufw: deny
+# incoming, allow tailscale0). tailscale serve proxies 443 → caddy:8080.
+#
+# Before first run:
+#   cp .env.example .env   and fill it in
+#   put the built app at ../dist (or adjust the caddy volume below)
+#
+# PIN the couchdb tag to the exact version of the server you're migrating
+# FROM. Upgrade later, deliberately, with a backup taken first.
+
+services:
+  couchdb:
+    image: couchdb:3.5
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCHDB_ADMIN_USER}
+      COUCHDB_PASSWORD: ${COUCHDB_ADMIN_PASSWORD}
+    volumes:
+      - ./data/couchdb:/opt/couchdb/data
+      - ./data/couchdb-config:/opt/couchdb/etc/local.d
+    ports:
+      - "127.0.0.1:5984:5984"   # loopback only — caddy + replication use it
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../dist:/srv/codex/dist:ro
+      - ./data/caddy:/data
+    ports:
+      - "127.0.0.1:8080:8080"   # loopback only — tailscale serve fronts it
+
+  auspex:
+    build:
+      context: ..
+      dockerfile: deploy/auspex.Dockerfile
+    restart: unless-stopped
+    environment:
+      COUCH_HOST: http://couchdb:5984
+      COUCH_USER: ${COUCHDB_ADMIN_USER}
+      COUCH_PASS: ${COUCHDB_ADMIN_PASSWORD}
+      KUMA_PUSH_URL: ${KUMA_PUSH_URL:-}
+    depends_on:
+      - couchdb
+
+  kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    volumes:
+      - ./data/kuma:/app/data
+    ports:
+      - "3001:3001"             # tailnet/LAN only via ufw
+
+  dockge:
+    image: louislam/dockge:1
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/dockge:/app/data
+      - ./:/opt/stacks/codex
+    environment:
+      DOCKGE_STACKS_DIR: /opt/stacks
+    ports:
+      - "5001:5001"             # tailnet/LAN only via ufw

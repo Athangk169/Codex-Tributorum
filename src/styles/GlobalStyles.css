@@ -82,15 +82,16 @@ html, body {
   overflow: hidden;
 }
 
-/* Carbon fibre texture — local asset preferred, CDN fallback */
+/* Carbon fibre texture — local asset only. (The old CDN "fallback" was
+   actually a second background layer fetched on every load — multi-
+   background CSS loads all layers — so every client pinged a third-party
+   host for a texture the local asset already provides.) */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 1;
-  background-image:
-    var(--texture-carbon),
-    url("https://www.transparenttextures.com/patterns/carbon-fibre.png");
+  background-image: var(--texture-carbon);
   opacity: 0.06;
   pointer-events: none;
 }

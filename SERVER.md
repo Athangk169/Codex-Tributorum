@@ -322,7 +322,56 @@ this document — fix the document.
 
 ---
 
-## 11. Quarterly ritual (15 minutes)
+## 11. Migrating away from Tailscale (if it ever turns hostile)
+
+Tailscale currently plays five roles: **network reachability** (NAT
+traversal + relays), **TLS certs** (Let's Encrypt, bound to the ts.net
+name), **DNS** (MagicDNS hostname), **access control** (the ACL), and
+**identity** (users + machine shares). The exit must replace all five.
+Don't do this preemptively — Tailscale's free tier (3 users / 100 devices,
+sharees uncounted) fits this project comfortably. Triggers: free tier
+shrinks below your needs, pricing turns predatory, or the company folds.
+
+**Recommended path — Headscale** (self-hosted, open-source reimplementation
+of the coordination server; the *clients* stay the same open-source
+Tailscale apps):
+
+1. **Buy a domain** (~₹700–1000/yr, the one new recurring cost). Needed
+   because browsers require real HTTPS for the app's secure-context APIs
+   (Web Crypto for offline login, service worker) — self-signed certs mean
+   manually installing a CA on every friend's device. Not worth it.
+2. **Run headscale** (Docker, can live on this same server) with its
+   embedded DERP relay. It needs one publicly reachable port — router
+   port-forward, or a ₹300/mo micro-VPS as the rendezvous if CGNAT blocks
+   you.
+3. **Re-point every device**: `tailscale up --login-server=https://hs.yourdomain`.
+   Friends become headscale users (it has no cross-tailnet sharing — they
+   join your network, restricted by ACL exactly like today).
+4. **Certs move to Caddy**: it already fronts everything (§3); switch it
+   from plain :8080 to terminating TLS itself with a Let's Encrypt cert via
+   DNS-01 challenge (works without public HTTP exposure). tailscale serve's
+   job disappears entirely.
+5. **ACL**: headscale uses the same policy format — port the
+   `shared → :443` rule as a user-based rule.
+6. **Clients**: update `COGITATOR_UPLINK_HOST` on each device (boot screen
+   field) and the default in BootScreen/MobileBootScreen/useFinanceData.
+   ⚠ `couchAuth.js` guesses protocol by hostname — `ts.net` → https, anything
+   else → http — so either enter the host **with an explicit `https://`
+   prefix** or fix that heuristic at migration time.
+
+**Fallback path — plain WireGuard + Caddy**: zero third-party software at
+all, at the cost of hand-managing peer keys/configs per device and a static
+hub (port-forward or VPS). Same Caddy/cert/host steps as above. Choose this
+only if headscale itself is somehow off the table — the manual key ceremony
+per friend is the price.
+
+**What survives unchanged either way**: CouchDB, the data, the compose
+stack, the app (host is already a configurable setting), the service worker
+(its `/db` exclusion is path-based, not domain-based), and the backups.
+The app was built same-origin behind one TLS endpoint — any stack that
+reproduces "one hostname, one cert, `/` + `/db`" satisfies it.
+
+## 12. Quarterly ritual (15 minutes)
 
 - [ ] Kuma: all checks green, no flapping history
 - [ ] Cockpit: SMART healthy, disk <70 % full, updates applied, uptime sane

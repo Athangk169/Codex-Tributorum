@@ -23,7 +23,7 @@
 // up everything it misses (notably the hashed bundles, whose names
 // aren't knowable here).
 // ─────────────────────────────────────────────────────────────
-const CACHE_NAME = 'codex-v3'; // bump to force a full cache reset
+const CACHE_NAME = 'codex-v4'; // bump to force a full cache reset
 
 const PRECACHE = [
   '/',
@@ -57,6 +57,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Network fetch that gives up after `ms` — when the server machine is
+// off but the client's network is up, a plain fetch waits out a long
+// TCP timeout (white screen) before the cache fallback ever fires.
+const fetchWithTimeout = (request, ms) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('sw-timeout')), ms);
+    fetch(request).then(
+      (res) => { clearTimeout(timer); resolve(res); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -69,19 +81,26 @@ self.addEventListener('fetch', (event) => {
   // CouchDB proxy — must never be served from cache.
   if (url.pathname === '/db' || url.pathname.startsWith('/db/')) return;
 
-  // Navigations: network-first so deploys propagate, shell offline.
+  // Navigations: network-first so deploys propagate, cached offline.
+  // NOTE: iframe loads (the holo pages) are navigations too — cache
+  // each under its OWN url, never a shared key, or a holo page would
+  // overwrite the app shell (codex-v3 had exactly that bug).
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetchWithTimeout(request, 5000)
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE_NAME)
-            .then((cache) => cache.put('/index.html', copy))
+            .then((cache) => cache.put(request, copy))
             .catch(() => {});
           return res;
         })
         .catch(() =>
-          caches.match('/index.html').then((hit) => hit || caches.match('/'))
+          // Exact page first (covers the holo iframes offline), then
+          // the app shell as the SPA fallback.
+          caches.match(request).then((hit) =>
+            hit || caches.match('/index.html').then((idx) => idx || caches.match('/'))
+          )
         )
     );
     return;

@@ -796,6 +796,191 @@ const ArchiveView = ({ archiveMonth, setArchiveMonth, archiveData, archiveLoadin
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// UpkeepView — trailing per-category burn rates. Cashflow stays
+// untouched: this only averages what actually left the accounts,
+// over completed months, so bulk purchases read at their true
+// monthly rate instead of spiking the month they were bought.
+// ─────────────────────────────────────────────────────────────
+const addMonthsYM = (ym, delta) => {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const UPKEEP_DRIFT_PCT = 30;   // flag when the 3-mo avg strays this % from the 12-mo baseline
+const UPKEEP_DRIFT_MIN = 500;  // ...and by at least this many ₹/month, to skip noise
+
+const UpkeepSparkline = ({ values }) => {
+  const W = 84, H = 22;
+  const max = Math.max(...values, 1);
+  const bw = W / values.length;
+  return (
+    <svg width={W} height={H} style={{ display: 'block' }}>
+      {values.map((v, i) => {
+        const h = v > 0 ? Math.max(2, (v / max) * (H - 2)) : 0;
+        return (
+          <rect key={i} x={i * bw + 1} y={H - h} width={Math.max(bw - 2, 1)} height={h}
+            fill="rgba(34,197,94,0.55)" />
+        );
+      })}
+      <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} stroke="rgba(201,168,76,0.25)" strokeWidth={1} />
+    </svg>
+  );
+};
+
+const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
+  // Windows end on the last COMPLETED month — the running month would skew
+  // every average low.
+  const lastMonth = addMonthsYM(todayMonth, -1);
+  const window12 = Array.from({ length: 12 }, (_, i) => addMonthsYM(lastMonth, i - 11));
+  const byMonth = new Map(trends.map(t => [t.month, t.byCategory || {}]));
+  const genesis = trends.length ? trends[0].month : null;
+
+  // Zero-spend months count toward the divisor — that is the whole point —
+  // but months before ledger genesis don't exist and must not dilute.
+  const monthsAvailable = (n) => {
+    if (!genesis || genesis > lastMonth) return 0;
+    const start = window12[12 - n];
+    if (genesis <= start) return n;
+    const [gy, gm] = genesis.split('-').map(Number);
+    const [ly, lm] = lastMonth.split('-').map(Number);
+    return (ly - gy) * 12 + (lm - gm) + 1;
+  };
+
+  const spend = (cat, month) => Math.abs(byMonth.get(month)?.[cat] || 0);
+  const avgOver = (cat, n) => {
+    const div = monthsAvailable(n);
+    if (!div) return { avg: 0, partial: false };
+    const sum = window12.slice(12 - n).reduce((acc, m) => acc + spend(cat, m), 0);
+    return { avg: sum / div, partial: div < n };
+  };
+
+  const rows = expenseCategories.map(cat => {
+    const spark = window12.map(m => spend(cat, m));
+    const a3 = avgOver(cat, 3), a6 = avgOver(cat, 6), a12 = avgOver(cat, 12);
+    const driftAmt = a3.avg - a12.avg;
+    const driftPct = a12.avg > 0 ? (driftAmt / a12.avg) * 100 : null;
+    const drifted = driftPct !== null
+      && Math.abs(driftPct) >= UPKEEP_DRIFT_PCT
+      && Math.abs(driftAmt) >= UPKEEP_DRIFT_MIN;
+    return { cat, spark, last: spend(cat, lastMonth), a3, a6, a12, driftAmt, driftPct, drifted };
+  })
+    .filter(r => r.spark.some(v => v > 0))
+    .sort((a, b) => b.a12.avg - a.a12.avg);
+
+  const totals = {
+    last: rows.reduce((a, r) => a + r.last, 0),
+    a3:   rows.reduce((a, r) => a + r.a3.avg, 0),
+    a6:   rows.reduce((a, r) => a + r.a6.avg, 0),
+    a12:  rows.reduce((a, r) => a + r.a12.avg, 0),
+  };
+  const anyPartial = rows.some(r => r.a3.partial || r.a6.partial || r.a12.partial);
+  const fmtAvg = (w) => `${fmtINR(w.avg)}${w.partial ? '*' : ''}`;
+
+  return (
+    <>
+      <style>{`
+        .upk-tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+        .upk-tbl thead th {
+          position: sticky; top: 0; background: var(--bg-d); z-index: 1;
+          padding: 10px 8px 10px 0; font-size: 11px; letter-spacing: 1px;
+          color: var(--text-d); font-weight: normal; text-align: right;
+          border-bottom: 1px solid var(--border);
+        }
+        .upk-tbl thead th:first-child, .upk-tbl thead th:nth-child(2) { text-align: left; }
+        .upk-tbl td { padding: 11px 8px 11px 0; text-align: right; }
+        .upk-tbl td:first-child, .upk-tbl td:nth-child(2) { text-align: left; }
+        .upk-tbl tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; }
+        .upk-cat { color: var(--border-hi); letter-spacing: 1px; }
+        .upk-dim { color: var(--text-d); }
+        .upk-total td { border-top: 1px solid var(--border); color: var(--ba-gold); font-weight: bold; cursor: default; }
+        .upk-drift { position: relative; display: inline-block; cursor: help; }
+        .upk-drift .upk-tip {
+          display: none; position: absolute; right: 0; bottom: 130%;
+          width: 230px; padding: 8px 10px; z-index: 5; text-align: left;
+          background: rgba(8,1,1,0.97); border: 1px solid var(--ba-gold-dim);
+          font-size: 10px; letter-spacing: 1px; line-height: 1.6;
+          white-space: normal; color: #fbe9b0;
+        }
+        .upk-drift:hover .upk-tip { display: block; }
+        .upk-up   { color: var(--ba-crimson); }
+        .upk-down { color: var(--border-hi); }
+      `}</style>
+      <div className="panel mech-panel" style={{ padding: 20, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <div className="sec-ttl">SUSTAINMENT MATRIX — MONTHLY BURN BY CATEGORY</div>
+          <div style={{ fontSize: 9, color: 'var(--text-d)', letterSpacing: 1 }}>
+            COMPLETED MONTHS · {formatMonthLabel(window12[0])} — {formatMonthLabel(lastMonth)}
+          </div>
+        </div>
+        {rows.length === 0 ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: 12 }}>
+            NO EXPENDITURE RECORDED IN THE LAST 12 MONTHS
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <table className="upk-tbl">
+              <thead>
+                <tr>
+                  <th>CATEGORY</th>
+                  <th>TREND (12 MO)</th>
+                  <th>LAST MONTH</th>
+                  <th>3-MO AVG</th>
+                  <th>6-MO AVG</th>
+                  <th>12-MO AVG</th>
+                  <th>SHARE</th>
+                  <th style={{ width: 40 }}>FLUX</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.cat} className="manifest-row" onClick={() => onInspect(r.cat)} title="INSPECT IN TRENDS">
+                    <td className="upk-cat">{r.cat.toUpperCase()}</td>
+                    <td><UpkeepSparkline values={r.spark} /></td>
+                    <td className="upk-dim">{fmtINR(r.last)}</td>
+                    <td>{fmtAvg(r.a3)}</td>
+                    <td>{fmtAvg(r.a6)}</td>
+                    <td>{fmtAvg(r.a12)}</td>
+                    <td className="upk-dim">{totals.a12 > 0 ? `${((r.a12.avg / totals.a12) * 100).toFixed(1)}%` : '—'}</td>
+                    <td onClick={e => e.stopPropagation()}>
+                      {r.drifted && (
+                        <span className={`upk-drift ${r.driftAmt > 0 ? 'upk-up' : 'upk-down'}`}>
+                          {r.driftAmt > 0 ? '▲' : '▼'}
+                          <span className="upk-tip">
+                            <strong>{r.cat.toUpperCase()}</strong><br />
+                            3-MO RATE {r.driftAmt > 0 ? '+' : '−'}{Math.abs(r.driftPct).toFixed(0)}% VS 12-MO BASELINE<br />
+                            ({r.driftAmt > 0 ? '+' : '−'}{fmtINR(Math.abs(r.driftAmt))}/MO)
+                          </span>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="upk-total">
+                  <td>TOTAL</td>
+                  <td />
+                  <td>{fmtINR(totals.last)}</td>
+                  <td>{fmtINR(totals.a3)}</td>
+                  <td>{fmtINR(totals.a6)}</td>
+                  <td>{fmtINR(totals.a12)}</td>
+                  <td>100%</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+            {anyPartial && (
+              <div style={{ fontSize: 9, color: 'var(--text-d)', letterSpacing: 1, marginTop: 10 }}>
+                * WINDOW EXTENDS PAST LEDGER GENESIS — AVERAGED OVER AVAILABLE MONTHS ONLY
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
 // AuspexSlide
 const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }) => {
   const [mode, setMode] = useState('trends');
@@ -1020,7 +1205,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
       {/* HEADER */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 15, flexShrink: 0 }}>
         <div className="panel mech-panel" style={{ padding: 15, display: 'flex', gap: 10 }}>
-          {['manifest', 'trends', 'archive'].map(m => (
+          {['manifest', 'trends', 'upkeep', 'archive'].map(m => (
             <button key={m} className={`mech-btn${mode === m ? ' active' : ''}`}
               style={{ flex: 1, margin: 0, background: mode === m ? 'var(--border-hi)' : 'transparent', color: mode === m ? '#000' : 'var(--text-d)' }}
               onClick={() => setMode(m)}>{m.toUpperCase()}</button>
@@ -1060,6 +1245,13 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
           genesisMonth={data?.genesisMonth}
           positiveCategories={data?.positiveCategories || []}
           neutralCategories={data?.neutralCategories || []}
+        />
+      ) : mode === 'upkeep' ? (
+        <UpkeepView
+          trends={expenseTrends}
+          expenseCategories={expenseCategories}
+          todayMonth={todayMonth}
+          onInspect={(cat) => { setSelectedCategory(cat); setMode('trends'); }}
         />
       ) : mode === 'manifest' ? (
         <div className="panel mech-panel" style={{ padding: 20, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

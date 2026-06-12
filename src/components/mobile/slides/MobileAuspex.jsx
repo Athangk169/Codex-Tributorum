@@ -104,7 +104,9 @@ const normalizeAsset = (asset) => ({
   ...asset,
   id: asset.id || asset.ticker,
   avgPrice: Number(asset.avgPrice ?? asset.avg_price ?? 0) || 0,
-  currentprice: Number(asset.currentprice ?? asset.current_price ?? asset.price ?? asset.ltp ?? asset.avgPrice ?? asset.avg_price ?? 0) || 0,
+  // Prefer current_price: the daemon only writes the snake_case key, so a
+  // stale camelCase currentprice (set at entry time) must not shadow it.
+  currentprice: Number(asset.current_price ?? asset.currentprice ?? asset.price ?? asset.ltp ?? asset.avgPrice ?? asset.avg_price ?? 0) || 0,
 });
 
 const normalizeSnapshot = (doc) => ({
@@ -788,7 +790,6 @@ export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMe
           shares: newShares,
           avgPrice: newAvgPrice,
           avg_price: newAvgPrice,
-          currentprice: newAvgPrice,
           current_price: newAvgPrice,
         });
       }

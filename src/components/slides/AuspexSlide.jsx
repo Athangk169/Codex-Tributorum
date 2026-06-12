@@ -20,7 +20,9 @@ const normalizeAsset = (asset) => ({
   ...asset,
   id: asset.id || asset.ticker,
   avgPrice: Number(asset.avgPrice ?? asset.avg_price ?? 0) || 0,
-  currentprice: Number(asset.currentprice ?? asset.current_price ?? asset.price ?? asset.ltp ?? asset.avgPrice ?? asset.avg_price ?? 0) || 0,
+  // Prefer current_price: the daemon only writes the snake_case key, so a
+  // stale camelCase currentprice (set at entry time) must not shadow it.
+  currentprice: Number(asset.current_price ?? asset.currentprice ?? asset.price ?? asset.ltp ?? asset.avgPrice ?? asset.avg_price ?? 0) || 0,
 });
 
 const normalizeSnapshot = (doc) => ({
@@ -947,7 +949,6 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
           shares: newShares,
           avgPrice: newAvgPrice,
           avg_price: newAvgPrice,
-          currentprice: newAvgPrice,
           current_price: newAvgPrice,
         });
       }
@@ -1072,8 +1073,8 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
               <table className="investment-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-d)', zIndex: 1 }}>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['TICKER', 'SHARES', 'AVG', 'INVESTED', 'CUR. VALUE', 'P&L'].map(h => (
-                      <th key={h} style={{ padding: '10px 8px 10px 0', textAlign: ['INVESTED', 'CUR. VALUE', 'P&L'].includes(h) ? 'right' : 'left', fontSize: 10, color: 'var(--text-d)' }}>{h}</th>
+                    {['TICKER', 'SHARES', 'AVG', 'INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].map(h => (
+                      <th key={h} style={{ padding: '10px 8px 10px 0', textAlign: ['INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].includes(h) ? 'right' : 'left', fontSize: 10, color: 'var(--text-d)' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1087,6 +1088,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                     const invested = avgPrice * shares;
                     const value = currentPrice * shares;
                     const pl = value - invested;
+                    const plPct = invested > 0 ? (pl / invested) * 100 : 0;
                     const animDelay = `${Math.min(index * 0.05, 0.4)}s`;
                     return (
                       <tr key={ast.id} className="manifest-row assimilate-in"
@@ -1099,8 +1101,11 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                         <td style={{ padding: '10px 8px 10px 0', color: 'var(--text-d)' }}>{avgPrice.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }}>{invested.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right', color: 'var(--text-d)' }}>{value.toLocaleString()}</td>
-                        <td style={{ padding: '10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
+                        <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
                           {pl >= 0 ? '+' : ''}{pl.toLocaleString()}
+                        </td>
+                        <td style={{ padding: '10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
+                          {pl >= 0 ? '+' : ''}{plPct.toFixed(2)}%
                         </td>
                       </tr>
                     );

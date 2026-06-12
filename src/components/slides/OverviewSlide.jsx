@@ -513,16 +513,16 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   const auditColor       = globalAuditState === 'CORRUPTED' ? '#cc2200' : globalAuditState === 'RESTLESS' ? '#eab308' : 'var(--border-hi)';
   const isGlobalCrit     = globalAuditState === 'CORRUPTED';
 
-  // System/obligation entries are balance events, not consumption — a loan
-  // drawdown goes straight to the institution and EMI/loan payments are
-  // debt service. Mirror the engine's special-casing so they never show
-  // up as spending vectors.
-  const systemCats = new Set(['Loan Drawdown', 'Loan Payment', 'EMI Payment', 'Opening Balance', 'Account Closure', 'Cash c/d']);
+  // Loan/system entries are balance events, not consumption — a drawdown
+  // goes straight to the institution, loan payments are debt service from
+  // an untracked account. EMI payments stay IN: they're real spending from
+  // tracked accounts (the balance engine counts them in grossExpense too).
+  const systemCats = new Set(['Loan Drawdown', 'Loan Payment', 'Opening Balance', 'Account Closure', 'Cash c/d']);
   const catSpend = {};
   txns.forEach(tx => {
     const cat = tx.category || 'UNCATEGORIZED';
     const tag = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
-    if (systemCats.has(cat) || tx.loan_id || tx.emi_id) return;
+    if (systemCats.has(cat) || tx.loan_id) return;
     if (!positiveCats.includes(cat) && !neutralCats.includes(cat) && !tag) {
       catSpend[cat] = (catSpend[cat] || 0) + Math.abs(tx.amount || 0);
     }

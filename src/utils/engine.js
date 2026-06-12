@@ -873,12 +873,14 @@ export const TemporalEngine = {
 // ─────────────────────────────────────────────────────────────
 export const AnalyticsEngine = {
 
+  // Loan events are excluded from trends (drawdowns aren't income, loan
+  // payments come from an untracked account). EMI payments are NOT
+  // excluded — they're real spending from tracked accounts, consistent
+  // with FinanceEngine counting them in grossExpense.
   _isObligationTxn(txn) {
     return txn?.category === 'Loan Drawdown'
       || txn?.category === 'Loan Payment'
-      || txn?.category === 'EMI Payment'
-      || !!txn?.loan_id
-      || !!txn?.emi_id;
+      || !!txn?.loan_id;
   },
 
   _isExternalLoanPayment(txn) {

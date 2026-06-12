@@ -540,14 +540,15 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
 
   const positiveCats = data?.positiveCategories || [];
   const neutralCats  = data?.neutralCategories  || [];
-  // System/obligation entries are balance events, not consumption — keep
-  // them out of the spending vectors (mirrors OverviewSlide).
-  const systemCats = new Set(['Loan Drawdown', 'Loan Payment', 'EMI Payment', 'Opening Balance', 'Account Closure', 'Cash c/d']);
+  // Loan/system entries are balance events, not consumption; EMI payments
+  // stay in — they're real spending from tracked accounts (mirrors
+  // OverviewSlide and the balance engine's grossExpense).
+  const systemCats = new Set(['Loan Drawdown', 'Loan Payment', 'Opening Balance', 'Account Closure', 'Cash c/d']);
   const categorySpending = {};
   txns.forEach(tx => {
     const cat = tx.category || 'UNCATEGORIZED';
     const tag = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
-    if (systemCats.has(cat) || tx.loan_id || tx.emi_id) return;
+    if (systemCats.has(cat) || tx.loan_id) return;
     if (!positiveCats.includes(cat) && !neutralCats.includes(cat) && !tag) {
       categorySpending[cat] = (categorySpending[cat] || 0) + Math.abs(tx.amount);
     }

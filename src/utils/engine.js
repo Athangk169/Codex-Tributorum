@@ -284,11 +284,19 @@ export const TransferEngine = {
 
     if (to && state[to] !== undefined) {
       if (typeof state[to] === 'object') {
-        const first = Object.keys(state[to])[0];
-        if (first) {
-          state[to][first] = to === 'Card'
-            ? state[to][first] - absAmt
-            : state[to][first] + absAmt;
+        // Honour the account the txn was logged against when it belongs to
+        // the destination type — a Cash Deposit logged on bank_sbi must
+        // credit bank_sbi. (Previously this always hit the first account,
+        // silently mis-crediting deposits on multi-account setups.)
+        const target = (txn?.account_type === to &&
+                        txn?.sub_account &&
+                        state[to][txn.sub_account] !== undefined)
+          ? txn.sub_account
+          : Object.keys(state[to])[0];
+        if (target) {
+          state[to][target] = to === 'Card'
+            ? state[to][target] - absAmt
+            : state[to][target] + absAmt;
         }
       } else if (typeof state[to] === 'number') {
         state[to] = to === 'Card'

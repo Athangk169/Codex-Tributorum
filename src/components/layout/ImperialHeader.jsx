@@ -134,13 +134,19 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
   const imperialDate = `0.${fraction} ${yearOfMil} .M${millennium}`;
 
   const displayUser = (user || 'default').toUpperCase();
-  const metrics     = financeData?.metrics || {};
   const buckets     = financeData?.buckets || {};
 
+  // Same definitions as the Overview slide's KPIs: card debt prefers the
+  // billed cross-card aggregate (totalDebt — negative when net prepaid);
+  // NET POSITION = liquid reserve (bank + cash) minus card debt.
+  // (Previously this showed metrics.netIncome — monthly income, not a position.)
+  const cardDebt    = financeData?.totalDebt ?? (buckets.Card || 0);
+  const netPosition = (buckets.Bank || 0) + (buckets.Cash || 0) - cardDebt;
+
   const financialItems = [
-    { label: 'NET POSITION', val: metrics.netIncome || 0 },
-    { label: 'BANK RESERVE', val: buckets.Bank      || 0 },
-    { label: (buckets.Card || 0) < 0 ? 'CARD CREDIT' : 'DEBT LOAD', val: Math.abs(buckets.Card || 0) },
+    { label: 'NET POSITION', val: netPosition },
+    { label: 'BANK RESERVE', val: buckets.Bank || 0 },
+    { label: cardDebt < 0 ? 'CARD CREDIT' : 'DEBT LOAD', val: Math.abs(cardDebt) },
   ];
 
   const tickerItems = [];

@@ -12,9 +12,11 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 npx vite build --outDir dist-next
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
-# /E recurse, /R:1 /W:1 one quick retry, skip files that stay locked
-# (locked files are in-flight streams of unchanged assets — safe to skip).
-robocopy dist-next dist /E /R:1 /W:1 /NFL /NDL /NJH | Out-Null
+# /E recurse, /PURGE drop files no longer in the build (stale hashed
+# bundles otherwise accumulate forever and bloat dist/ and the APK),
+# /R:1 /W:1 one quick retry, skip files that stay locked (in-flight
+# streams of unchanged assets — safe to skip).
+robocopy dist-next dist /E /PURGE /R:1 /W:1 /NFL /NDL /NJH | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit $LASTEXITCODE" }
 
 Remove-Item -Recurse -Force dist-next

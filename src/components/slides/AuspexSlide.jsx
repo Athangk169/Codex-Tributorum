@@ -891,6 +891,7 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
         .upk-tbl thead th:first-child, .upk-tbl thead th:nth-child(2) { text-align: left; }
         .upk-tbl td { padding: 11px 8px 11px 0; text-align: right; }
         .upk-tbl td:first-child, .upk-tbl td:nth-child(2) { text-align: left; }
+        .upk-tbl thead th:first-child, .upk-tbl td:first-child { padding-left: 11px; }
         .upk-tbl tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; }
         .upk-cat { color: var(--border-hi); letter-spacing: 1px; }
         .upk-dim { color: var(--text-d); }

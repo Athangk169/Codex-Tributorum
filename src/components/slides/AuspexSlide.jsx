@@ -895,7 +895,12 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
         .upk-cat { color: var(--border-hi); letter-spacing: 1px; }
         .upk-dim { color: var(--text-d); }
         .upk-total td { border-top: 1px solid var(--border); color: var(--ba-gold); font-weight: bold; cursor: default; }
-        .upk-drift { position: relative; display: inline-block; cursor: help; }
+        .upk-drift {
+          position: relative; display: inline-flex; align-items: center; gap: 4px;
+          cursor: help; padding: 2px 7px; border-radius: 2px;
+          font-size: 11px; letter-spacing: 0.5px; white-space: nowrap;
+          border: 1px solid transparent;
+        }
         .upk-drift .upk-tip {
           display: none; position: absolute; right: 0; bottom: 130%;
           width: 230px; padding: 8px 10px; z-index: 5; text-align: left;
@@ -904,8 +909,10 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
           white-space: normal; color: #fbe9b0;
         }
         .upk-drift:hover .upk-tip { display: block; }
-        .upk-up   { color: var(--ba-crimson); }
-        .upk-down { color: var(--border-hi); }
+        .upk-up   { color: var(--ba-crimson); background: rgba(204,34,0,0.12);  border-color: rgba(204,34,0,0.40); }
+        .upk-down { color: var(--border-hi); background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.35); }
+        .upk-tbl tbody tr.upk-flux-up   td:first-child { box-shadow: inset 2px 0 0 var(--ba-crimson); }
+        .upk-tbl tbody tr.upk-flux-down td:first-child { box-shadow: inset 2px 0 0 var(--border-hi); }
       `}</style>
       <div className="panel mech-panel" style={{ padding: 20, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -929,24 +936,23 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
                   <th>3-MO AVG</th>
                   <th>6-MO AVG</th>
                   <th>12-MO AVG</th>
+                  <th style={{ width: 96 }}>FLUX</th>
                   <th>SHARE</th>
-                  <th style={{ width: 40 }}>FLUX</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map(r => (
-                  <tr key={r.cat} className="manifest-row" onClick={() => onInspect(r.cat)} title="INSPECT IN TRENDS">
+                  <tr key={r.cat} className={`manifest-row${r.drifted ? (r.driftAmt > 0 ? ' upk-flux-up' : ' upk-flux-down') : ''}`} onClick={() => onInspect(r.cat)} title="INSPECT IN TRENDS">
                     <td className="upk-cat">{r.cat.toUpperCase()}</td>
                     <td><UpkeepSparkline values={r.spark} /></td>
                     <td className="upk-dim">{fmtINR(r.last)}</td>
                     <td>{fmtAvg(r.a3)}</td>
                     <td>{fmtAvg(r.a6)}</td>
                     <td>{fmtAvg(r.a12)}</td>
-                    <td className="upk-dim">{totals.a12 > 0 ? `${((r.a12.avg / totals.a12) * 100).toFixed(1)}%` : '—'}</td>
                     <td onClick={e => e.stopPropagation()}>
                       {r.drifted && (
                         <span className={`upk-drift ${r.driftAmt > 0 ? 'upk-up' : 'upk-down'}`}>
-                          {r.driftAmt > 0 ? '▲' : '▼'}
+                          {r.driftAmt > 0 ? '▲' : '▼'} {r.driftAmt > 0 ? '+' : '−'}{Math.abs(r.driftPct).toFixed(0)}%
                           <span className="upk-tip">
                             <strong>{r.cat.toUpperCase()}</strong><br />
                             3-MO RATE {r.driftAmt > 0 ? '+' : '−'}{Math.abs(r.driftPct).toFixed(0)}% VS 12-MO BASELINE<br />
@@ -955,6 +961,7 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
                         </span>
                       )}
                     </td>
+                    <td className="upk-dim">{totals.a12 > 0 ? `${((r.a12.avg / totals.a12) * 100).toFixed(1)}%` : '—'}</td>
                   </tr>
                 ))}
                 <tr className="upk-total">
@@ -964,8 +971,8 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
                   <td>{fmtINR(totals.a3)}</td>
                   <td>{fmtINR(totals.a6)}</td>
                   <td>{fmtINR(totals.a12)}</td>
-                  <td>100%</td>
                   <td />
+                  <td>100%</td>
                 </tr>
               </tbody>
             </table>

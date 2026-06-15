@@ -95,7 +95,7 @@ src/
 │   │   ├── AuspexSlide.jsx       (investments)
 │   │   ├── LiquiditySlide.jsx    (credit cards)
 │   │   ├── BankAccountsSlide.jsx
-│   │   ├── ObligationsSlide.jsx  (loans + recurring + EMIs)
+│   │   ├── ObligationsSlide.jsx  (recurring + EMIs)
 │   │   └── HoloSlide.jsx         (3D scene + category rules)
 │   │
 │   └── mobile/                 # mobile shell + mirrored slides
@@ -134,7 +134,7 @@ Mobile has **no Obligations slide** — desktop-only. Everything else is
 
 ## 4. Engine modules
 
-[src/utils/engine.js](src/utils/engine.js) — ~2100 lines, ten named engines.
+[src/utils/engine.js](src/utils/engine.js) — ~1800 lines, ten named engines.
 The slides never query PouchDB directly; they go through engines.
 
 | Engine | What it does |
@@ -148,7 +148,7 @@ The slides never query PouchDB directly; they go through engines.
 | `TemporalEngine` | Ledger queries by month. |
 | `AnalyticsEngine` | Multi-month trends. |
 | `AccountEngine` | CRUD for accounts and cards. |
-| `ObligationsEngine` | Recurring expenses + loans + EMIs roll-up. |
+| `ObligationsEngine` | Recurring expenses + EMIs roll-up. |
 
 **Every** `allDocs` call is scoped to `startkey: \`txn:${userId}:\`` (or the
 equivalent for `finance:rule:`, `finance:account:`, etc.). This is what enforces
@@ -169,7 +169,6 @@ finance:rule:<user>:<category-slug>          // categorisation rules
 finance:account:<user>:<account-id>          // accounts
 finance:card:<user>:<card-id>                // cards
 finance:recurring:<user>:<recurring-id>      // recurring obligations
-finance:loan:<user>:<loan-id>                // loans
 finance:emi:<user>:<emi-id>                  // EMIs (instalment purchases)
 finance:provision:<user>:<provision-id>      // earmarked funds
 finance:snapshot:<user>:<YYYY-MM>            // month boundary snapshots
@@ -184,7 +183,7 @@ range queries (`startkey`/`endkey`) work for per-user isolation.
 
 - **`finances`** — only transactions. All other types live in metadata. This is the
   hot, write-heavy DB.
-- **`metadata_vault`** — accounts, cards, rules, recurring, loans, EMIs, provisions,
+- **`metadata_vault`** — accounts, cards, rules, recurring, EMIs, provisions,
   snapshots, config. Mostly read.
 - **`investments_vault`** — investment portfolio. Separate so it can be deleted/reset
   without nuking everything.

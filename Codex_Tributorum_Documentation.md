@@ -29,7 +29,7 @@
 14. [User Manual](#14-user-manual)
 15. [Setup Guides](#15-setup-guides)
 16. [How the Code Works](#16-how-the-code-works)
-17. [Loan and EMI Operating Guide](#17-loan-and-emi-operating-guide)
+17. [EMI Operating Guide](#17-emi-operating-guide)
 18. [Troubleshooting](#18-troubleshooting)
 
 ---
@@ -265,7 +265,7 @@ The app uses a "slide" navigation metaphor — each major view is a full-screen 
 | `liquidity` | `LiquiditySlide` | `MobileLiquidity` | Cash flow forecasting and liquidity analysis |
 | `holo` | `HoloSlide` | `MobileHolo` | HTML holographic visualizations + interactive `.glb` 3D models via `<model-viewer>` |
 | `bank` | `BankAccountsSlide` | `MobileBank` | Bank accounts and credit card management, card billing buckets |
-| `obligations` | `ObligationsSlide` | *(desktop only)* | Recurring expenses, loans, EMI purchases, repayment projections |
+| `obligations` | `ObligationsSlide` | *(desktop only)* | Recurring expenses, EMI purchases |
 
 ### HoloSlide — 3D & Holographic Display
 
@@ -679,15 +679,13 @@ Common workflow:
 1. Add a transaction with date, amount, description, account type, sub-account, and category.
 2. Let the categorization engine suggest a category from keyword rules.
 3. Correct the category if needed.
-4. For loan or EMI transactions, link the transaction to the relevant loan/EMI record.
+4. For EMI transactions, link the transaction to the relevant EMI record.
 5. Edit transaction principal/interest splits when bank statements provide exact values.
 
 Amount convention:
 
 - Income and inflows are positive.
 - Expenses and outflows are negative.
-- Loan drawdowns are positive because cash enters a bank account.
-- Loan payments are negative because cash leaves a bank account.
 
 ### 14.4 Holo Category Rules
 
@@ -724,7 +722,7 @@ Typical workflow:
 
 ### 14.8 Obligations
 
-The Obligations slide tracks recurring expenses, long-term loans, and consumer EMI purchases. Recurring expenses are matched against ledger transactions inside the current billing cycle. Loans and EMI purchases are calculated from metadata plus tagged transactions.
+The Obligations slide tracks recurring expenses and consumer EMI purchases. Recurring expenses are matched against ledger transactions inside the current billing cycle. EMI purchases are calculated from metadata plus tagged transactions.
 
 ---
 
@@ -797,7 +795,7 @@ On first login for a non-admin user:
 1. `useFinanceData` opens local PouchDB databases.
 2. Live sync starts if CouchDB is reachable.
 3. Category rules are seeded from Sanguinius/admin rules.
-4. Obligation categories are ensured: `Loan Drawdown`, `Loan Payment`, and `EMI Payment`.
+4. The `EMI Payment` obligation category is ensured.
 5. Finance data is reconstructed and passed to slides.
 
 If a new user has no categories in Holo, check that the Sanguinius/admin source rules exist and that metadata sync has completed.
@@ -851,7 +849,7 @@ The daemon should run on a machine that can reach CouchDB and the internet.
 | Transactions | `finances` | Ledger, obligations logging | FinanceEngine, AnalyticsEngine, CardEngine, ObligationsEngine |
 | Accounts/cards | `metadata_vault` | Bank/Liquidity screens | FinanceEngine, CardEngine, AccountEngine |
 | Category rules | `metadata_vault` | HoloSlide, seeder | CategorizationEngine, Ledger |
-| Loans/EMIs | `metadata_vault` | ObligationsSlide | ObligationsEngine, Ledger |
+| EMIs | `metadata_vault` | ObligationsSlide | ObligationsEngine, Ledger |
 | Investments | `investments_vault` | Auspex daemon / Auspex UI | Auspex slides |
 
 ### 16.3 Engine Boundaries
@@ -866,7 +864,7 @@ Current engine responsibilities:
 - `CardEngine`: credit card cycles, due buckets, paid/outstanding calculations.
 - `AnalyticsEngine`: monthly trends and category analytics.
 - `AccountEngine`: account and card CRUD.
-- `ObligationsEngine`: recurring expenses, loans, EMI purchases, loan projections.
+- `ObligationsEngine`: recurring expenses, EMI purchases.
 
 ### 16.4 Refresh and Sync Model
 
@@ -912,25 +910,13 @@ Older `category_rule` and `config_category_types*` docs may still exist. The cur
 
 ### 16.6 Obligation Calculation Model
 
-Loans are modeled as metadata plus tagged ledger transactions. Loan metadata contains sanctioned amount, disbursed/current amount, interest rate and rate history, phase, moratorium end, EMI amount, tenure months, and start date.
+EMI purchases are modeled as metadata plus tagged ledger transactions. EMI metadata contains total amount, down payment, financed amount, EMI amount, tenure months, interest rate, account, purchase date, and first EMI date.
 
-Tagged loan transactions contain `Loan Drawdown`, `Loan Payment`, `principal_component`, `interest_component`, and `loan_id`.
+Tagged EMI transactions contain `EMI Payment`, `principal_component`, `interest_component`, and `emi_id`.
 
-`getLoanBalance` reconstructs current balance by replaying opening principal, drawdowns, monthly interest accrual, and payments. Stored principal/interest splits are honored when present.
+`getEMIBalance` derives months paid, outstanding balance, principal/interest paid, next due date, and projected payoff from the tagged payments. Stored principal/interest splits are honored when present.
 
-`getLoanProjection` projects repayment only when the effective phase is repayment and an EMI amount exists.
-
-### 16.7 Effective Loan Phase
-
-Loan records store a manual `phase`, but calculations use an effective phase:
-
-- If stored phase is `repayment`, it stays repayment.
-- If stored phase is `moratorium` and `moratorium_end` is in the past or today, the effective phase becomes `repayment`.
-- The stored document is not mutated automatically.
-
-This lets the UI and calculations move into repayment automatically while preserving the original saved state.
-
-### 16.8 Frontend Component Pattern
+### 16.7 Frontend Component Pattern
 
 Desktop and mobile screens are parallel:
 
@@ -948,92 +934,22 @@ Most write flows follow this pattern:
 
 ---
 
-## 17. Loan and EMI Operating Guide
+## 17. EMI Operating Guide
 
-### 17.1 Two Ways to Enter an Existing Loan
+### 17.1 EMI Purchases
 
-#### Full-history mode
+Consumer EMI (instalment) purchases:
 
-Use this if you want exact reconstruction from loan start.
-
-Enter:
-
-- Actual loan start date.
-- Historical drawdowns.
-- Historical payments.
-- Principal/interest split from lender statement where available.
-
-Warning: historical drawdowns are positive bank transactions. They can affect reconstructed bank balances unless opening balances and bank history are aligned.
-
-#### Current-state mode
-
-Use this if you want a clean setup from today/current statement date.
-
-Enter:
-
-- `Drawn so far`: current total drawn/current lender balance basis.
-- `Start date`: current statement date or the date you want the app to begin tracking from.
-- `Phase`: current phase.
-- `Moratorium end`: future repayment start date, if applicable.
-- `Tenure`: remaining repayment months.
-- `EMI amount`: `0` during moratorium unless you want the log form to prefill a regular payment.
-
-Then track future payments only.
-
-### 17.2 Moratorium Education Loan Example
-
-For the current SBI education loan setup:
-
-- Sanctioned: `3393500`
-- Drawn/current: `1474000`
-- Interest rate: `6.9%`
-- Phase: `moratorium`
-- Moratorium end: `2028-07-10`
-- Start/current tracking date: `2026-05-26`
-- Tenure: `169`
-- EMI amount: `0`
-
-This is correct for current-state moratorium tracking.
-
-Monthly interest on `1474000` at `6.9%` is approximately `8476`. If you pay `8000` during moratorium, log it as a `Loan Payment`; it is effectively an interest-servicing payment.
-
-Do not use "Calculate EMI from rate / tenure" during moratorium unless you are calculating the future repayment EMI. It will calculate an amortizing repayment EMI, not the moratorium interest payment.
-
-### 17.3 Automatic Moratorium End
-
-When `moratorium_end` arrives:
-
-- The loan's effective phase becomes repayment.
-- The loan card can show repayment automatically.
-- Loan EMI load starts using the stored EMI amount.
-- Payment splitting moves to repayment behavior.
-- Projection becomes available if EMI amount is greater than zero.
-
-Before the moratorium end date, update the loan's EMI amount to the real bank EMI. If it remains `0`, the app can switch phase but cannot project repayment.
-
-### 17.4 Under-Amortizing EMI Warning
-
-If EMI is less than monthly interest, the projection marks the loan as unpayable rather than inventing a payoff date.
-
-Example:
-
-- Principal: `100000`
-- Annual rate: `24%`
-- Monthly interest: `2000`
-- EMI: `1000`
-
-The balance will grow, so the app returns `unpayable` and a minimum EMI threshold.
-
-### 17.5 EMI Purchases
-
-Consumer EMI purchases are simpler than loans:
-
-- They have a fixed financed amount.
-- They have a fixed EMI amount and tenure.
+- Have a fixed financed amount (total amount minus down payment).
+- Have a fixed EMI amount and tenure.
 - Payments are tagged as `EMI Payment`.
 - Principal/interest split is estimated by financed amount divided by total payable unless explicit components are stored.
 
-Use EMI purchases for phones, appliances, and card-based installment purchases. Use loans for education, home, vehicle, personal loans, or any facility with drawdowns/rate changes/moratorium.
+Use EMI purchases for phones, appliances, and card-based instalment purchases.
+
+### 17.2 Logging and Tracking
+
+Declare an EMI purchase from the Obligations slide (OUTSTANDING DEBTS tab), then log each instalment as an `EMI Payment` linked to that EMI record. `getEMIBalance` updates months paid, outstanding balance, next due date, and projected payoff from the tagged payments.
 
 ---
 
@@ -1050,28 +966,13 @@ Check:
 
 The current seed path copies old or new admin category formats into the new `finance:rule` schema.
 
-### Loan looks too high after adding historical drawdowns
-
-Historical drawdowns are positive bank inflows and increase loan disbursed amount. If you already entered `Drawn so far`, avoid also logging the same opening drawdown unless you intend full-history reconstruction.
-
-For most existing loans, current-state mode is simpler.
-
-### Loan does not project repayment
-
-Check:
-
-- Effective phase is repayment.
-- EMI amount is greater than zero.
-- EMI is higher than monthly interest.
-- Moratorium end has passed if stored phase remains moratorium.
-
 ### Bank balances look wrong
 
 Check transaction signs and account routing:
 
 - Expenses should be negative.
-- Income/drawdowns should be positive.
-- Credit card payments and loan payments should be outflows from bank accounts.
+- Income should be positive.
+- Credit card payments should be outflows from bank accounts.
 - Opening balances and historical imports should not duplicate current-state entries.
 
 ### Build works but lint fails

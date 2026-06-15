@@ -14,6 +14,7 @@ import React from 'react';
 //            Drives scroll speed. Idle ~2.2s, sync ~1.1s, error ~0.45s.
 //   color  — glyph hue (a syncLed-derived imperial tone).
 //   width  — visible pixels (defaults to 72). Height fixed at 14.
+//   active — when false the stream freezes in place (link is down).
 // ─────────────────────────────────────────────────────────────
 
 // Deterministic so it never reflows between renders. Reads as binary
@@ -28,10 +29,12 @@ const BinaryCantStream = ({
   rate = 2,
   color = '#4ade80',
   width = 72,
+  active = true,
 }) => {
   // Whole glyph-set passes over a multiple of the beat rate so idle
-  // drifts at a clearly readable pace and error races.
-  const dur = (rate * 2.2).toFixed(2);
+  // drifts at a clearly readable pace and error races. The multiplier
+  // is kept high so the tape reads as an unhurried data trickle.
+  const dur = (rate * 4.4).toFixed(2);
 
   const renderTape = (copy) =>
     GLYPHS.map((g, i) => {
@@ -84,7 +87,7 @@ const BinaryCantStream = ({
           .cant-track { animation-duration: 90s; }
         }
       `}</style>
-      <div className="cant-track" style={{ '--cant-dur': `${dur}s` }}>
+      <div className="cant-track" style={{ '--cant-dur': `${dur}s`, animationPlayState: active ? 'running' : 'paused' }}>
         {renderTape('a')}
         {renderTape('b')}
       </div>

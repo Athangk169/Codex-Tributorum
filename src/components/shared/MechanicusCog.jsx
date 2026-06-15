@@ -15,6 +15,9 @@ import React from 'react';
 //            consistent call signature with the other readouts.
 //   size   — pixels, square (defaults to 20).
 //   state  — optional syncLed value; 'error'/'red' triggers judder.
+//   active — when false the spin freezes in place (link is down). The
+//            judder still plays on error so a severed link rattles in
+//            alarm rather than turning.
 // ─────────────────────────────────────────────────────────────
 
 const MechanicusCog = ({
@@ -23,6 +26,7 @@ const MechanicusCog = ({
   color = '#4ade80',
   size = 20,
   state = 'idle',
+  active = true,
 }) => {
   const spinDur = (rate * 2.6).toFixed(2);
   const judder = state === 'error' || state === 'red';
@@ -65,6 +69,7 @@ const MechanicusCog = ({
         height={size}
         style={{
           '--cog-dur': `${spinDur}s`,
+          animationPlayState: active ? 'running' : 'paused',
           display: 'block',
           objectFit: 'cover',
           mixBlendMode: 'screen',

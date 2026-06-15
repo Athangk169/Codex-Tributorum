@@ -167,6 +167,11 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
     red:     { rate: 0.45, color: '#ff4444' },
   }[syncLed] || { rate: 2.2, color: '#c9a84c' };
 
+  // The noospheric link animates only while the link is actually live
+  // (actively syncing). Any other state — offline, severed, awaiting —
+  // freezes the cog and the binary cant where they stand.
+  const linkActive = syncLed === 'ok';
+
   return (
     <>
       <style>{BA_STYLES}</style>
@@ -287,9 +292,10 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
               color: '#b8923e', fontSize: '10px', letterSpacing: '1px', gap: '8px',
             }}>
               NOOSPHERIC LINK
-              {/* Cog-skull + binary cant stream, both paced by syncLed. */}
-              <MechanicusCog rate={beat.rate} color={beat.color} size={20} state={syncLed} />
-              <BinaryCantStream rate={beat.rate} color={beat.color} width={72} />
+              {/* Cog-skull + binary cant stream — paced by syncLed, and
+                  frozen when the link is not live. */}
+              <MechanicusCog rate={beat.rate} color={beat.color} size={20} state={syncLed} active={linkActive} />
+              <BinaryCantStream rate={beat.rate} color={beat.color} width={72} active={linkActive} />
               <span className={ledClass} style={{
                 display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%',
               }} />

@@ -155,7 +155,10 @@ const LedgerServoSkull = ({ x, y, status }) => {
 };
 
 // ── LedgerSlide ───────────────────────────────────────────────
-const OBLIGATION_CATEGORIES = ['Loan Drawdown', 'Loan Payment', 'EMI Payment'];
+// Loans were removed as a feature: 'Loan Drawdown' / 'Loan Payment' are no
+// longer offered for new entries. isLoanCategory is retained only so existing
+// loan transactions still render read-only in the ledger and are treated as
+// obligations (no reimbursement tagging) when present.
 const isLoanCategory = (category) => category === 'Loan Drawdown' || category === 'Loan Payment';
 const isEmiCategory = (category) => category === 'EMI Payment';
 const isObligationCategory = (category) => isLoanCategory(category) || isEmiCategory(category);
@@ -167,13 +170,12 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const expenseCategories  = useMemo(() => data?.expenseCategories  || [], [data?.expenseCategories]);
   const positiveCategories = useMemo(() => data?.positiveCategories || [], [data?.positiveCategories]);
   const neutralCategories  = useMemo(() => data?.neutralCategories  || [], [data?.neutralCategories]);
-  const loans              = useMemo(() => data?.obligations?.loans || [], [data?.obligations?.loans]);
   const emis               = useMemo(() => data?.obligations?.emis  || [], [data?.obligations?.emis]);
   const allCategories = [
     ...expenseCategories,
     ...positiveCategories,
     ...neutralCategories,
-    ...OBLIGATION_CATEGORIES,
+    'EMI Payment',
   ];
 
   // All previously used AR tags — drives datalist autocomplete
@@ -187,7 +189,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     description: '', amount: '', method: '',
     category: 'Uncategorized',
     isReimbursable: false, reimbursementTag: '', notes: '',
-    loanId: '', emiId: '', paidBy: '',
+    emiId: '',
   };
 
   const [formData,      setFormData]      = useState(blankForm);
@@ -218,50 +220,16 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
     || cards[0]?._id?.split(':').pop()
     || 'cash_main';
 
-  const getLoanAccountMethod = (loan, category) => {
-    if (!loan) return '';
-    const source = category === 'Loan Payment'
-      ? (loan.emi_account || loan.debit_account)
-      : (loan.debit_account || loan.emi_account);
-    return resolveSubAccountInput(source);
-  };
-
   const getEmiAccountMethod = (emi) => resolveSubAccountInput(emi?.account);
 
-  const selectedLoan = loans.find(loan => loan._id === formData.loanId);
   const selectedEmi  = emis.find(emi => emi._id === formData.emiId);
 
-  const resolveLoanLabel = (loanId) => {
-    const loan = loans.find(item => item._id === loanId);
-    return loan?.name || loanId?.split(':').pop() || 'UNKNOWN LOAN';
-  };
+  // Loans are gone; historical loan rows only need a display label from the id.
+  const resolveLoanLabel = (loanId) => loanId?.split(':').pop() || 'UNKNOWN LOAN';
 
   const resolveEmiLabel = (emiId) => {
     const emi = emis.find(item => item._id === emiId);
     return emi?.name || emiId?.split(':').pop() || 'UNKNOWN EMI';
-  };
-
-  const isPaidByUser = (paidBy) => {
-    const payer = (paidBy || '').trim();
-    if (!payer) return true;
-    return payer.toLowerCase() === (user || '').toLowerCase();
-  };
-
-  const calculateLoanPaymentComponents = (loan, amount) => {
-    const absAmount = Math.abs(Number(amount) || 0);
-    if (!loan || absAmount <= 0) return { principal: 0, interest: absAmount };
-    const phase = loan.balance?.phase || loan.phase;
-    if (phase !== 'repayment' || Number(loan.emi || 0) <= 0) {
-      return { principal: 0, interest: absAmount };
-    }
-
-    const currentInterestDue = Number(loan.balance?.outstandingInterest ?? loan.balance?.nextInterestDue ?? 0);
-    const interest = Math.min(absAmount, Math.max(0, currentInterestDue));
-
-    return {
-      principal: Math.max(0, absAmount - interest),
-      interest,
-    };
   };
 
   const calculateEmiPaymentComponents = (emi, amount, existingTxn = null) => {
@@ -292,37 +260,6 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const markInvalid = () => {
     setSkullState(prev => ({ ...prev, status: 'error' }));
     setTimeout(() => setSkullState(prev => ({ ...prev, status: 'idle' })), 600);
-  };
-
-  const syncLoanDrawdownMetadata = async (oldTxn, newTxn) => {
-    if (!dbMetadata) return;
-
-    const deltas = new Map();
-    const addDelta = (loanId, delta) => {
-      if (!loanId || !delta) return;
-      deltas.set(loanId, (deltas.get(loanId) || 0) + delta);
-    };
-
-    if (oldTxn?.category === 'Loan Drawdown') {
-      addDelta(oldTxn.loan_id, -Math.abs(Number(oldTxn.amount || 0)));
-    }
-    if (newTxn?.category === 'Loan Drawdown') {
-      addDelta(newTxn.loan_id, Math.abs(Number(newTxn.amount || 0)));
-    }
-
-    for (const [loanId, delta] of deltas) {
-      if (!delta) continue;
-      try {
-        const loan = await dbMetadata.get(loanId);
-        await dbMetadata.put({
-          ...loan,
-          disbursed_amount: Math.max(0, Number(loan.disbursed_amount || 0) + delta),
-          updated: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.error('Loan drawdown sync failed:', err);
-      }
-    }
   };
 
   // Skull state
@@ -367,30 +304,13 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
           next.isReimbursable = false;
           next.reimbursementTag = '';
         }
-        if (!isLoanCategory(value)) {
-          next.loanId = '';
-          next.paidBy = '';
-        }
         if (!isEmiCategory(value)) next.emiId = '';
-        if (isLoanCategory(value) && !next.loanId && loans.length > 0) {
-          next.loanId = loans[0]._id;
-        }
         if (isEmiCategory(value) && !next.emiId && emis.length > 0) {
           next.emiId = emis[0]._id;
         }
       }
 
       const category = name === 'category' ? value : next.category;
-
-      if (isLoanCategory(category) && (name === 'category' || name === 'loanId')) {
-        const loan = loans.find(item => item._id === next.loanId);
-        const method = getLoanAccountMethod(loan, category);
-        if (method) next.method = method;
-        if (category === 'Loan Payment') {
-          if (!next.amount && loan?.emi) next.amount = String(loan.emi);
-          if (!next.paidBy) next.paidBy = user || '';
-        }
-      }
 
       if (isEmiCategory(category) && (name === 'category' || name === 'emiId')) {
         const emi = emis.find(item => item._id === next.emiId);
@@ -469,10 +389,6 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       markInvalid();
       return;
     }
-    if (isLoanCategory(formData.category) && !formData.loanId) {
-      markInvalid();
-      return;
-    }
     if (isEmiCategory(formData.category) && !formData.emiId) {
       markInvalid();
       return;
@@ -492,26 +408,17 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
 
     const rawAmt        = Number(formData.amount);
     const category      = formData.category;
-    const loan          = loans.find(item => item._id === formData.loanId);
     const emi           = emis.find(item => item._id === formData.emiId);
-    const paidBy        = (formData.paidBy || '').trim() || user;
-    const isExternalPmt = category === 'Loan Payment' && !isPaidByUser(paidBy);
     const fallback      = getFallbackMethod();
     const requestedSub  = resolveSubAccountInput(formData.method);
-    const subId         = isExternalPmt
-      ? 'external'
-      : requestedSub
-        || (isLoanCategory(category) ? getLoanAccountMethod(loan, category) : '')
-        || (isEmiCategory(category) ? getEmiAccountMethod(emi) : '')
-        || fallback;
-    const actType       = isExternalPmt ? 'External' : resolveAccountType(subId);
-    const isIncome      = positiveCategories.includes(category) || category === 'Loan Drawdown';
+    const subId         = requestedSub
+      || (isEmiCategory(category) ? getEmiAccountMethod(emi) : '')
+      || fallback;
+    const actType       = resolveAccountType(subId);
+    const isIncome      = positiveCategories.includes(category);
     const signedAmt     = isIncome ? Math.abs(rawAmt) : -Math.abs(rawAmt);
     const suffix        = Math.random().toString(36).substring(2, 10);
     const txnId         = isEditing || `txn:${user}:${formData.date}:${suffix}`;
-    const loanParts     = category === 'Loan Payment'
-      ? calculateLoanPaymentComponents(loan, rawAmt)
-      : null;
     const emiParts      = category === 'EMI Payment'
       ? calculateEmiPaymentComponents(emi, rawAmt, existingTxn)
       : null;
@@ -531,11 +438,11 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                            : null,
       notes:             formData.notes.trim() || null,
       // Explicit nulls clear stale obligation tags when editing entries.
-      loan_id:           isLoanCategory(category) ? formData.loanId : null,
+      loan_id:           null,
       emi_id:            isEmiCategory(category) ? formData.emiId : null,
-      paid_by:           category === 'Loan Payment' ? paidBy : null,
-      principal_component: loanParts ? loanParts.principal : emiParts ? emiParts.principal : null,
-      interest_component:  loanParts ? loanParts.interest  : emiParts ? emiParts.interest  : null,
+      paid_by:           null,
+      principal_component: emiParts ? emiParts.principal : null,
+      interest_component:  emiParts ? emiParts.interest  : null,
       created_at:        new Date().toISOString(),
     };
 
@@ -546,7 +453,6 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
         } else {
           await dbTransactions.put(newTxn);
         }
-        await syncLoanDrawdownMetadata(existingTxn, newTxn);
         setLastAddedId(txnId);
       } catch (err) {
         console.error('◈ INSCRIBE FAILED:', err);
@@ -586,9 +492,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       reimbursementTag: (tx.reimbursement_tag && tx.reimbursement_tag !== 'untagged')
                           ? tx.reimbursement_tag : '',
       notes:            tx.notes || '',
-      loanId:           tx.loan_id || '',
       emiId:            tx.emi_id || '',
-      paidBy:           tx.paid_by || user || '',
     });
     setIsEditing(tx._id);
   };
@@ -599,7 +503,6 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       try {
         const doc = await dbTransactions.get(id);
         await dbTransactions.remove(doc);
-        await syncLoanDrawdownMetadata(doc, null);
       } catch (err) { console.error('◈ PURGE FAILED:', err); }
     }
   };
@@ -763,56 +666,6 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                   .map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
             </div>
-
-            {isLoanCategory(formData.category) && (
-              <div
-                className="reimb-tag-row"
-                style={{
-                  gridColumn: '1 / -1',
-                  display: 'grid',
-                  gridTemplateColumns: formData.category === 'Loan Payment' ? '1.3fr 1fr' : '1fr',
-                  gap: '15px'
-                }}
-              >
-                <div>
-                  <label className="kpi-lbl">OBLIGATION TARGET // LOAN</label>
-                  <select
-                    name="loanId" value={formData.loanId}
-                    onChange={handleInputChange} className="mech-select" required
-                    onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
-                    onBlur={() => aimSkull(null)}
-                    style={!formData.loanId ? { borderColor: 'var(--ba-crimson)', boxShadow: 'inset 0 0 8px rgba(204,34,0,0.2)' } : {}}
-                  >
-                    <option value="">-- SELECT LOAN --</option>
-                    {loans.map(loan => (
-                      <option key={loan._id} value={loan._id}>
-                        {loan.name} // {loan.phase?.toUpperCase() || 'ACTIVE'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {formData.category === 'Loan Payment' && (
-                  <div>
-                    <label className="kpi-lbl">PAYER IDENT</label>
-                    <input
-                      type="text" name="paidBy" value={formData.paidBy}
-                      onChange={handleInputChange}
-                      placeholder={user || 'SELF'}
-                      className="mech-input"
-                      onFocus={(e) => aimSkull(e.target, 30, 0, 'focus')}
-                      onBlur={() => aimSkull(null)}
-                    />
-                  </div>
-                )}
-
-                {selectedLoan && (
-                  <div style={{ gridColumn: '1 / -1', fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>
-                    {selectedLoan.phase?.toUpperCase() || 'ACTIVE'} // OUTSTANDING {Math.round(selectedLoan.balance?.outstanding ?? selectedLoan.disbursed_amount ?? 0).toLocaleString()} // EMI {Math.round(selectedLoan.emi || 0).toLocaleString()}
-                  </div>
-                )}
-              </div>
-            )}
 
             {isEmiCategory(formData.category) && (
               <div className="reimb-tag-row" style={{ gridColumn: '1 / -1' }}>
@@ -1006,7 +859,10 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                           {Math.abs(tx.amount).toLocaleString()}
                         </td>
                         <td style={{ textAlign: 'right', verticalAlign: 'top', paddingTop: '10px' }}>
-                          <button className="action-btn" onClick={() => handleEdit(tx)}>EDIT</button>
+                          {/* Loans were removed; historical loan rows are read-only (no edit). */}
+                          {!(tx.loan_id || isLoanCategory(tx.category)) && (
+                            <button className="action-btn" onClick={() => handleEdit(tx)}>EDIT</button>
+                          )}
                           <button
                             className="action-btn del"
                             onClick={() => handleDelete(tx._id)}

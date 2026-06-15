@@ -422,9 +422,9 @@ export const useFinanceData = (credentials) => {
             arByTag:            arByTag || {},
             genesisMonth,
             obligations:        obligations || {
-              recurring: [], loans: [], emis: [],
+              recurring: [], emis: [],
               totalMonthlyLoad: 0, recurringMonthlyLoad: 0,
-              emiMonthlyLoad: 0, loanMonthlyLoad: 0,
+              emiMonthlyLoad: 0,
               recurringStats: { paid: 0, pending: 0, overdue: 0, total: 0 }
             }
           });

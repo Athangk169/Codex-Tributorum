@@ -130,7 +130,8 @@ Codex-Tributorum/
 │   │   └── shared/              # Shared/reusable components
 │   ├── hooks/
 │   │   ├── useFinanceData.js    # Main data access hook (PouchDB)
-│   │   └── useIsMobile.js       # Responsive layout detection
+│   │   ├── useIsMobile.js       # Responsive layout detection
+│   │   └── useBudgets.js        # Per-category monthly spending caps (quotas)
 │   └── utils/
 │       ├── engine.js            # Core finance calculation engines
 │       └── audioCore.js         # BGM and SFX audio system
@@ -256,7 +257,7 @@ The app uses a "slide" navigation metaphor — each major view is a full-screen 
 |-----------|------------------|-----------------|-------------|
 | `overview` | `OverviewSlide` | `MobileOverview` | Net worth summary, income vs. expense metrics, monthly trend charts |
 | `ledger` | `LedgerSlide` | `MobileLedger` | Full transaction log with add/edit/delete, auto-categorization, manual category override |
-| `auspex` | `AuspexSlide` | `MobileAuspex` | Investment portfolio tracker — current value, P&L, monthly snapshots |
+| `auspex` | `AuspexSlide` | `MobileAuspex` | Investment portfolio tracker (value, P&L, snapshots); also expense trends, upkeep burn-rate, monthly archive, and per-category budget quotas (Munitorum Tithe-Grant) |
 | `liquidity` | `LiquiditySlide` | `MobileLiquidity` | Cash flow forecasting and liquidity analysis |
 | `holo` | `HoloSlide` | `MobileHolo` | HTML holographic visualizations + interactive `.glb` 3D models via `<model-viewer>` |
 | `bank` | `BankAccountsSlide` | `MobileBank` | Bank accounts and credit card management, card billing buckets |
@@ -330,6 +331,7 @@ Stores all configuration, account definitions, category rules, and monthly snaps
 | `finance:account:{userId}:{accountId}` | Bank account definition |
 | `finance:card:{userId}:{cardId}` | Credit card definition |
 | `finance:rule:{userId}:{categorySlug}` | Auto-categorization rule |
+| `finance:budget:{userId}:{categorySlug}` | Per-category monthly spending cap (quota) — actuals derived from trends, not stored |
 | `finance:config:categories:{userId}` | User's income/expense/neutral category lists |
 | `finance:config:routes` | Category-to-account routing table (system-wide) |
 | `finance:config:analytics` | Analytics configuration (system-wide) |

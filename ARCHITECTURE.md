@@ -54,7 +54,8 @@ src/
 │   ├── useFinanceData.js # PouchDB lifecycle + sync wiring. The most important
 │   │                       hook in the app. Owns syncLed state.
 │   ├── useIsMobile.js    # viewport breakpoint at 768px
-│   └── useRulesAndCategories.js
+│   ├── useRulesAndCategories.js
+│   └── useBudgets.js     # per-category monthly caps (quotas) — Auspex Quota view
 │
 ├── utils/
 │   ├── engine.js         # all read/write business logic — 10 named engines.
@@ -166,6 +167,7 @@ the `Sanguinius` admin's category rules into a new user's namespace on first log
 ```
 txn:<user>:<YYYY-MM-DD>:<8-char-suffix>      // transactions
 finance:rule:<user>:<category-slug>          // categorisation rules
+finance:budget:<user>:<category-slug>        // per-category monthly spending caps (quotas)
 finance:account:<user>:<account-id>          // accounts
 finance:card:<user>:<card-id>                // cards
 finance:recurring:<user>:<recurring-id>      // recurring obligations

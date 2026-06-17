@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { localMonthStr } from '../../utils/localDate';
 import ScrambleText from '../shared/ScrambleText';
 import { FinanceEngine } from '../../utils/engine';
+import { useBudgets } from '../../hooks/useBudgets';
+import SlideTransition from '../shared/SlideTransition';
+
+// Auspex sub-view tabs, left→right. Order drives the scan-wipe
+// direction when switching modes (mirrors the app's slide nav).
+const AUSPEX_MODES = ['manifest', 'trends', 'upkeep', 'quota', 'archive'];
 
 // ── Month helpers ─────────────────────────────────────────────
 const formatMonthLabel = (monthPrefix) => {
@@ -989,9 +995,400 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// QuotaView — per-category monthly spending caps ("quotas").
+// Targets come from useBudgets; actuals are read live from the
+// current month's byCategory trend. Four stat chips reconcile the
+// cycle (tithe received / expended / sanctioned quota / net), then
+// the Tithe-Grant slate lists each sanctioned category draining
+// against its cap, with a crimson "pace" marker (where you should
+// be by today's date) — fill past the marker = burning too fast.
+// The verdict stamp reflects quota adherence, not cashflow.
+// ─────────────────────────────────────────────────────────────
+
+// ── Quota status (shared by all skins) ───────────────────────
+// paid = within cap · pending = on pace to exceed · met = fully
+// drawn (at the cap) · overdue = over. `met` uses a small tolerance
+// because spent is a float sum that rarely lands exactly on the cap.
+const quotaStatus = (spent, cap, paceFrac) => {
+  if (spent > cap) return 'overdue';
+  if (cap > 0 && spent >= cap - cap * 0.005) return 'met';   // within ~0.5% of cap = fully drawn (0-cap held at zero stays "within")
+  const projected = paceFrac > 0 ? spent / paceFrac : spent;
+  return projected > cap ? 'pending' : 'paid';
+};
+const QUOTA_BADGE = { paid: 'WITHIN', pending: 'NEARING', met: 'AT LIMIT', overdue: 'EXCEEDED' };
+
+// Roman numerals for decree clause indices / grant dates.
+const toRoman = (n) => {
+  const map = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+  let s = '', x = Math.max(0, Math.floor(n));
+  for (const [v, sym] of map) while (x >= v) { s += sym; x -= v; }
+  return s || '·';
+};
+
+const QuotaView = ({ trends, expenseCategories, db, userId, onInspect }) => {
+  const { budgets, setBudget, removeBudget } = useBudgets(db, userId);
+
+  const now         = new Date();
+  const y           = now.getFullYear();
+  const mo          = now.getMonth();
+  const monthKey    = `${y}-${String(mo + 1).padStart(2, '0')}`;
+  const dayOfMonth  = now.getDate();
+  const daysInMonth = new Date(y, mo + 1, 0).getDate();
+  const paceFrac    = daysInMonth > 0 ? dayOfMonth / daysInMonth : 0;
+
+  const curByCat = (trends.find(t => t.month === monthKey)?.byCategory) || {};
+  const spendOf  = (cat) => Math.abs(curByCat[cat] || 0);
+
+  // Suggestion seed: average over up to 6 completed months in the ledger.
+  const completed = trends.filter(t => t.month < monthKey);
+  const last6     = completed.slice(-6);
+  const avgOf     = (cat) =>
+    last6.length ? last6.reduce((a, t) => a + Math.abs(t.byCategory?.[cat] || 0), 0) / last6.length : 0;
+
+  const capOf = (cat) => Number(budgets[cat]?.monthly_cap) || 0;
+
+  // Real expense categories only. `expenseCategories` already drops
+  // income/neutral, but it still lists every category *rule* — including
+  // dormant, global, and system rules that never had a transaction.
+  // Intersect with categories that actually appear in the spend history
+  // (byCategory only ever holds non-income expenditure), mirroring the
+  // Upkeep matrix, so those non-real categories don't show here.
+  const expenseSet = new Set(expenseCategories);
+  const everSpent = new Set();
+  trends.forEach(t => {
+    const bc = t.byCategory || {};
+    for (const c in bc) if (expenseSet.has(c) && Math.abs(bc[c]) > 0) everSpent.add(c);
+  });
+  const active = [...everSpent];
+
+  // Already-budgeted expense categories always show (so a quota can be
+  // edited/cleared even if it went dormant); the "set a quota" list only
+  // offers active expense categories.
+  const sanctioned = expenseCategories
+    .filter(c => budgets[c])
+    .sort((a, b) => (spendOf(b) / (capOf(b) || 1)) - (spendOf(a) / (capOf(a) || 1)));
+  const unsanctioned = active.filter(c => !budgets[c])
+    .sort((a, b) => (spendOf(b) - spendOf(a)) || a.localeCompare(b)); // this-cycle spend first
+
+  const totalQuota = sanctioned.reduce((a, c) => a + capOf(c), 0);
+  const totalSpent = sanctioned.reduce((a, c) => a + spendOf(c), 0);
+  const remains    = totalQuota - totalSpent;
+
+  // ── Cycle reconciliation — ties the budget to actual income/expense.
+  // Read straight from the monthly trend, which already excludes
+  // reimbursements (income drops "Reimbursement Received"; expense drops
+  // reimbursable-tagged txns), so this matches Overview/Auspex exactly.
+  const cur          = trends.find(t => t.month === monthKey) || {};
+  const income       = Math.max(0, cur.income  || 0);
+  const totalExpense = Math.max(0, cur.expense || 0);
+  const net          = income - totalExpense;
+  const offTithe     = Math.max(0, totalExpense - totalSpent); // spend outside any sanctioned tithe
+  const ratePct      = income > 0 ? Math.round((net / income) * 100) : null;
+
+  const hasCats = sanctioned.length > 0 || unsanctioned.length > 0;
+
+  // Normalised render rows for the sanctioned categories.
+  const rows = sanctioned.map(cat => {
+    const cap = capOf(cat), spent = spendOf(cat);
+    const over = spent > cap;
+    // A 0 cap means "should stay at zero" — any spend is fully over.
+    const frac = cap > 0 ? spent / cap : (over ? 1 : 0);
+    return {
+      cat, cap, spent, frac,
+      pct: cap > 0 ? Math.round((spent / cap) * 100) : (over ? 100 : 0),
+      fillPct: Math.min(frac, 1) * 100,
+      st: quotaStatus(spent, cap, paceFrac),
+      over,
+      remaining: cap - spent,
+    };
+  });
+
+  // ── Shared inline edit state (used for both editing a cap and
+  // sanctioning a new one — setBudget creates or updates). ──
+  const [editCat, setEditCat] = useState(null);
+  const [editVal, setEditVal] = useState('');
+  const isEd = (c) => editCat === c;
+  const beginEdit  = (cat, seed) => { setEditCat(cat); setEditVal(seed > 0 ? String(seed) : ''); };
+  const cancelEdit = () => setEditCat(null);
+  const commitEdit = async () => {
+    const t = editVal.trim();
+    const n = Number(t);
+    // 0 is a valid cap ("hold at zero"); blank cancels — use CLEAR to revoke.
+    if (t !== '' && Number.isFinite(n) && n >= 0) { try { await setBudget(editCat, n); } catch { /* hook reverts */ } }
+    setEditCat(null);
+  };
+  const clear = async (cat) => { try { await removeBudget(cat); } catch { /* hook reverts */ } };
+
+  const editorEl = () => (
+    <span className="q-ed">
+      <input className="mech-input" type="number" autoFocus value={editVal}
+        onChange={e => setEditVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
+        onBlur={e => { if (!e.currentTarget.parentElement.contains(e.relatedTarget)) cancelEdit(); }}
+        style={{ width: 96, marginTop: 0, padding: '2px 6px' }} />
+      <button className="q-mini gold" onClick={commitEdit}>OK</button>
+      <button className="q-mini" onClick={cancelEdit}>✕</button>
+    </span>
+  );
+
+  // ── Tithe-Decree — Mechanicus data-slate (dark/mono) + wax seals ──
+  const todayStr  = `${String(dayOfMonth).padStart(2, '0')}.${String(mo + 1).padStart(2, '0')}.${y}`;
+  const grantNo   = `${toRoman(mo + 1)}·${y}`;
+  // Verdict stamp reflects quota adherence (not cashflow): any cap
+  // breached → exceeded; any fully-drawn or on-pace-to-exceed → nearing;
+  // all clear → within; nothing sanctioned → unsealed.
+  const quotaVerdict = rows.length === 0 ? 'none'
+    : rows.some(r => r.over)                                   ? 'overdue'
+    : rows.some(r => r.st === 'pending' || r.st === 'met')    ? 'pending'
+    :                                                            'paid';
+  const stampWord  = { paid: 'WITHIN MEANS', pending: 'NEARING LIMIT', overdue: 'OVERDRAWN', none: 'UNSEALED' }[quotaVerdict];
+  const stampClass = { paid: 'ok',           pending: 'warn',          overdue: 'over',      none: 'none'     }[quotaVerdict];
+
+  const renderDecree = () => (
+    <div className="q-dec">
+      <div className="wm-aquila" aria-hidden="true" />
+      <div className="q-dec-frame">
+        <div className={`q-dec-stamp ${stampClass}`} aria-hidden="true">{stampWord}</div>
+        <div className="q-dec-head">
+          <div className="q-dec-title">Munitorum Tithe-Grant</div>
+          <div className="q-dec-sub2">grant № {grantNo} · {formatMonthLabel(monthKey)} · ✠ M41 ✠</div>
+          <div className="q-dec-preamble">
+            Sums sanctioned for the sustainment of His servant, measured against the expenditure of this cycle — spend not beyond thy tithe.
+          </div>
+        </div>
+
+        <div className="q-dec-scroll">
+          {rows.length === 0 && <div className="q-empty sm">NO QUOTAS SANCTIONED — INSCRIBE ONE BELOW</div>}
+          {rows.map((r, i) => (
+            <div key={r.cat} className={`q-dec-line${isEd(r.cat) ? ' editing' : ''}`}>
+              <span className="q-dec-clause">{toRoman(i + 1)}</span>
+              <div className="q-dec-body" style={{ cursor: isEd(r.cat) ? 'default' : 'pointer' }} onClick={isEd(r.cat) ? undefined : () => onInspect(r.cat)} title={isEd(r.cat) ? undefined : 'INSPECT IN TRENDS'}>
+                <div className="q-dec-line-top">
+                  <span className="q-dec-name">{r.cat}</span>
+                  <span className="q-dec-sum">{fmtINR(r.cap)}</span>
+                </div>
+                {isEd(r.cat) ? <div className="q-dec-edit">{editorEl()}</div> : (
+                  <>
+                    <div className="q-dec-rule">
+                      <span className={`q-dec-ink ${r.st}`} style={{ width: `${r.fillPct}%` }} />
+                      {paceFrac > 0 && paceFrac < 1 && <i className="q-dec-pace" style={{ left: `${paceFrac * 100}%` }} title="pace expected by today" />}
+                    </div>
+                    <div className="q-dec-foot">
+                      <span>expended {fmtINR(r.spent)} · {r.over ? `${fmtINR(-r.remaining)} over` : r.st === 'met' ? 'fully expended' : `${fmtINR(r.remaining)} remain`}{avgOf(r.cat) > 0 ? ` · wont ~${fmtINR(avgOf(r.cat))}/mo` : ''}</span>
+                      <span className={`q-dec-stat ${r.st}`}>{r.over ? 'overdrawn' : r.st === 'met' ? 'fully drawn' : r.st === 'pending' ? 'nearing limit' : 'within means'}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <span className={`q-seal ${r.st}`} title={QUOTA_BADGE[r.st]}>
+                <span className="q-seal-ribbon" aria-hidden="true" />
+                <img src="/purity_seal.jpg" alt="" />
+              </span>
+              {!isEd(r.cat) && (
+                <span className="q-dec-acts">
+                  <button className="q-mini" onClick={() => beginEdit(r.cat, Math.round(r.cap))}>EDIT</button>
+                  <button className="q-mini del" onClick={() => clear(r.cat)}>CLEAR</button>
+                </span>
+              )}
+            </div>
+          ))}
+          {unsanctioned.length > 0 && (
+            <>
+              <div className="q-dec-divider">✠ unsanctioned expenditure{offTithe > 0 ? ` — ${fmtINR(offTithe)} off-tithe this cycle` : ' — petition for a tithe'} ✠</div>
+              {unsanctioned.map(cat => {
+                const sp = spendOf(cat);
+                return (
+                  <div key={cat} className={`q-dec-line unset${isEd(cat) ? ' editing' : ''}`}>
+                    <span className="q-dec-clause dim">·</span>
+                    <div className="q-dec-body">
+                      <div className="q-dec-line-top">
+                        <span className="q-dec-name dim">{cat}</span>
+                        <span className={`q-dec-sum${sp > 0 ? ' offtithe' : ' dim'}`}>
+                          {sp > 0 ? `${fmtINR(sp)} drawn` : avgOf(cat) > 0 ? `wont ~${fmtINR(avgOf(cat))}/mo` : '—'}
+                        </span>
+                      </div>
+                      {isEd(cat) && <div className="q-dec-edit">{editorEl()}</div>}
+                    </div>
+                    {!isEd(cat) && <button className="q-mini gold" onClick={() => beginEdit(cat, Math.round(avgOf(cat) || sp))}>SANCTION</button>}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        <div className="q-dec-footer">
+          <div className="q-dec-totals">
+            <span>granted <b>{fmtINR(totalQuota)}</b></span>
+            <span className="q-dec-tdot">✠</span>
+            <span>drawn <b className={remains < 0 ? 'crit' : ''}>{fmtINR(totalSpent)}</b></span>
+            <span className="q-dec-tdot">✠</span>
+            <span>balance <b className={remains < 0 ? 'crit' : 'ok'}>{fmtINR(remains)}</b></span>
+          </div>
+          <div className="q-dec-sign">
+            <span className="q-dec-sigtext"><b className="q-dec-signame">{String(userId || 'ADEPT')}</b> · adept-scrivener of the estate · {todayStr}</span>
+            <span className="q-dec-wax" title="seal of office"><img src="/purity_seal.jpg" alt="" /></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <style>{`
+        .q-stats { display: flex; gap: 8px; margin-bottom: 12px; flex-shrink: 0; position: relative; z-index: 1; }
+        .q-chip { flex: 1; padding: 8px 12px; background: var(--ba-bg-panel); border: 1px solid var(--ba-border); position: relative; overflow: hidden; }
+        .q-chip::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--ba-gold-dim), transparent); }
+        .q-chip-lbl { font-size: 9px; color: var(--ba-gold-dim); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+        .q-chip-val { font-size: 20px; font-weight: bold; font-family: var(--mono); color: #fff; }
+        .q-chip-val.gold { color: var(--ba-gold);    text-shadow: 0 0 10px rgba(201,168,76,0.5); }
+        .q-chip-val.crit { color: var(--ba-crimson); text-shadow: 0 0 10px rgba(204,34,0,0.6); }
+        .q-chip-val.ok   { color: var(--border-hi);  text-shadow: var(--glow); }
+        .q-chip-sub { font-size: 8px; letter-spacing: 1px; color: var(--ba-gold-mute); margin-top: 3px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .q-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+        .q-empty { text-align: center; padding: 40px 20px; color: var(--ba-gold-mute); font-family: var(--mono); font-size: 11px; letter-spacing: 2px; }
+        .q-empty.sm { padding: 18px; font-size: 10px; }
+
+        .q-mini { padding: 3px 9px; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; cursor: pointer; background: transparent; border: 1px solid var(--ba-border); color: var(--ba-gold-mute); text-transform: uppercase; transition: all 0.15s; }
+        .q-mini:hover { border-color: var(--ba-gold-dim); color: var(--ba-gold); }
+        .q-mini.gold { border-color: var(--ba-gold-dim); color: var(--ba-gold); }
+        .q-mini.gold:hover { background: rgba(201,168,76,0.14); }
+        .q-mini.del:hover { border-color: var(--ba-crimson); color: var(--ba-crimson); }
+        .q-ed { display: inline-flex; align-items: center; gap: 6px; }
+
+        /* wax purity seal */
+        .q-seal { position: relative; width: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .q-seal img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: screen; }
+        .q-seal.paid    img { filter: sepia(0.5) saturate(1.4) hue-rotate(5deg) brightness(1.05); }
+        .q-seal.pending img { filter: sepia(0.7) saturate(1.7) hue-rotate(-12deg); }
+        .q-seal.met     img { filter: sepia(0.7) saturate(2) hue-rotate(-8deg) brightness(1.1); }
+        .q-seal.overdue img { filter: sepia(0.6) saturate(3) hue-rotate(-35deg) brightness(0.85); transform: rotate(-6deg); }
+
+        /* ── DECREE (Mechanicus data-slate) ── */
+        .q-dec { flex: 1; display: flex; min-height: 0; position: relative; }
+        .q-dec-frame {
+          flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; z-index: 1;
+          background: linear-gradient(180deg, var(--panel-mid) 0%, var(--panel-lo) 100%);
+          border: 1px solid var(--ba-border); border-top: 2px solid var(--ba-gold-dim);
+          box-shadow: inset 0 0 24px rgba(0,0,0,0.8), 0 0 10px rgba(180,20,0,0.06);
+        }
+        .q-dec-frame::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, #c9a84c55, #c9a84c88, #c9a84c55, transparent); z-index: 3; }
+        .q-dec-frame::after { content: ''; position: absolute; inset: 0; background-image: var(--texture-carbon); opacity: 0.05; pointer-events: none; }
+
+        .q-dec-head { position: relative; text-align: center; padding: 14px 20px 12px; border-bottom: 1px solid var(--ba-border-lo); flex-shrink: 0; max-width: 440px; margin: 0 auto; }
+        .q-dec-title { font-family: var(--mono); font-size: 15px; font-weight: bold; letter-spacing: 4px; text-transform: uppercase; color: var(--ba-gold); text-shadow: 0 0 8px rgba(201,168,76,0.4); }
+        .q-dec-sub2 { font-family: var(--mono); font-size: 9px; letter-spacing: 2px; color: var(--ba-gold-mute); margin-top: 6px; text-transform: uppercase; }
+        .q-dec-preamble { font-family: var(--mono); font-size: 9px; line-height: 1.6; letter-spacing: 1px; color: var(--text-d); text-transform: uppercase; max-width: 580px; margin: 8px auto 2px; opacity: 0.7; }
+        .q-dec-stamp { position: absolute; top: 12px; right: 16px; z-index: 2; transform: rotate(-7deg); padding: 3px 10px; border: 1px solid currentColor; font-family: var(--mono); font-size: 10px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; opacity: 0.9; }
+        .q-dec-stamp.ok   { color: var(--border-hi); background: rgba(74,222,128,0.08); }
+        .q-dec-stamp.warn { color: var(--ba-gold);   background: rgba(201,168,76,0.08); }
+        .q-dec-stamp.over { color: var(--ba-crimson); background: rgba(204,34,0,0.1); }
+        .q-dec-stamp.none { color: var(--ba-gold-mute); }
+
+        .q-dec-scroll { flex: 1; overflow-y: auto; padding: 4px 0; position: relative; z-index: 1; }
+        .q-dec-scroll::-webkit-scrollbar { width: 3px; }
+        .q-dec-scroll::-webkit-scrollbar-track { background: #050000; }
+        .q-dec-scroll::-webkit-scrollbar-thumb { background: var(--ba-border); }
+        .q-dec-line { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--ba-border-lo); transition: background 0.15s; }
+        .q-dec-line:hover { background: rgba(74,10,0,0.15); }
+        .q-dec-line.editing { background: rgba(201,168,76,0.08); box-shadow: inset 2px 0 0 var(--ba-gold-dim); }
+        .q-dec-line.unset { opacity: 0.85; }
+        .q-dec-clause { font-family: var(--mono); font-size: 11px; color: var(--ba-gold-dim); min-width: 26px; text-align: right; flex-shrink: 0; }
+        .q-dec-clause.dim { color: var(--ba-gold-mute); }
+        .q-dec-body { flex: 1; min-width: 0; cursor: default; }
+        .q-dec-line-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+        .q-dec-name { font-family: var(--mono); font-size: 12.5px; letter-spacing: 1px; color: #fff; text-shadow: 0 0 7px rgba(255,255,255,0.28); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .q-dec-name.dim { color: var(--ba-gold-dim); text-shadow: none; }
+        .q-dec-sum { font-family: var(--mono); font-size: 13px; font-weight: bold; color: var(--ba-gold); flex-shrink: 0; }
+        .q-dec-sum.dim { color: var(--ba-gold-mute); font-weight: normal; font-size: 11px; }
+        .q-dec-sum.offtithe { color: var(--ba-gold); font-weight: bold; font-size: 12px; }
+        .q-dec-rule { position: relative; height: 5px; margin: 9px 0 6px; background: rgba(0,15,0,0.4); border: 1px solid var(--ba-border); }
+        .q-dec-ink { display: block; height: 100%; transition: width 0.6s ease; }
+        .q-dec-ink.paid    { background: linear-gradient(90deg, var(--border-hi), #88ffcc); box-shadow: 0 0 6px rgba(74,222,128,0.3); }
+        .q-dec-ink.pending { background: linear-gradient(90deg, var(--ba-gold-dim), var(--ba-gold)); box-shadow: 0 0 6px rgba(201,168,76,0.35); }
+        .q-dec-ink.met     { background: linear-gradient(90deg, var(--ba-gold), #f0d27a); box-shadow: 0 0 8px rgba(201,168,76,0.55); }
+        .q-dec-ink.overdue { background: linear-gradient(90deg, var(--ba-crimson-d), var(--ba-crimson)); box-shadow: 0 0 6px rgba(204,34,0,0.4); }
+        .q-dec-pace { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 1px solid var(--ba-crimson); box-shadow: 0 0 4px rgba(204,34,0,0.7); }
+        .q-dec-foot { display: flex; justify-content: space-between; gap: 10px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px; color: var(--ba-gold-mute); }
+        .q-dec-stat.paid    { color: var(--border-hi); }
+        .q-dec-stat.pending { color: var(--ba-gold); }
+        .q-dec-stat.met     { color: var(--ba-gold); font-weight: bold; text-shadow: 0 0 6px rgba(201,168,76,0.5); }
+        .q-dec-stat.overdue { color: var(--ba-crimson); font-weight: bold; }
+        .q-dec-edit { margin: 8px 0 4px; }
+        .q-dec-acts { display: flex; gap: 5px; flex-shrink: 0; }
+        .q-dec-divider { font-family: var(--mono); font-size: 9px; letter-spacing: 3px; color: var(--ba-gold-mute); text-align: center; padding: 14px 0 10px; text-transform: uppercase; border-bottom: 1px solid var(--ba-border-lo); }
+
+        .q-seal-ribbon { position: absolute; bottom: -5px; left: 50%; width: 12px; height: 14px; transform: translateX(-50%); background: linear-gradient(180deg, var(--ba-crimson-d), #5a0700); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%); opacity: 0.85; }
+
+        .q-dec-footer { border-top: 1px solid var(--ba-border-lo); flex-shrink: 0; padding: 4px 16px 5px; position: relative; z-index: 1; }
+        .q-dec-totals { display: flex; justify-content: center; align-items: center; gap: 12px; font-family: var(--mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ba-gold-dim); }
+        .q-dec-totals b { color: #fff; font-weight: bold; }
+        .q-dec-totals b.crit { color: var(--ba-crimson); }
+        .q-dec-totals b.ok { color: var(--border-hi); }
+        .q-dec-tdot { color: var(--ba-gold-mute); font-size: 9px; }
+        .q-dec-sign { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 2px; }
+        .q-dec-sigtext { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; color: var(--ba-gold-mute); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .q-dec-signame { color: var(--ba-gold); font-weight: bold; letter-spacing: 2px; }
+        .q-dec-wax { width: 22px; height: 22px; flex-shrink: 0; }
+        .q-dec-wax img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: screen; filter: sepia(0.5) saturate(2) hue-rotate(-20deg); transform: rotate(8deg); }
+      `}</style>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        {/* shared stat chips — cycle reconciliation (reimbursement-free) */}
+        <div className="q-stats">
+          <div className="q-chip">
+            <div className="q-chip-lbl">TITHE RECEIVED</div>
+            <div className="q-chip-val ok"><ScrambleText text={fmtINR(income)} speed={50} step={0.25} /></div>
+            <div className="q-chip-sub">CYCLE DAY {dayOfMonth} / {daysInMonth}</div>
+          </div>
+          <div className="q-chip">
+            <div className="q-chip-lbl">EXPENDED</div>
+            <div className="q-chip-val crit"><ScrambleText text={fmtINR(totalExpense)} speed={50} step={0.25} /></div>
+            <div className="q-chip-sub">{fmtINR(totalSpent)} TITHED · {fmtINR(offTithe)} OFF-TITHE</div>
+          </div>
+          <div className="q-chip">
+            <div className="q-chip-lbl">SANCTIONED QUOTA</div>
+            <div className="q-chip-val gold"><ScrambleText text={fmtINR(totalQuota)} speed={50} step={0.25} /></div>
+            <div className="q-chip-sub">{remains < 0 ? `${fmtINR(-remains)} OVERDRAWN` : `${fmtINR(remains)} UNSPENT`} · {sanctioned.length} TITHE{sanctioned.length === 1 ? '' : 'S'}</div>
+          </div>
+          <div className="q-chip">
+            <div className="q-chip-lbl">NET {net < 0 ? 'DEFICIT' : 'SURPLUS'}</div>
+            <div className={`q-chip-val ${net < 0 ? 'crit' : 'ok'}`}>
+              <ScrambleText text={`${net < 0 ? '−' : '+'}${fmtINR(Math.abs(net))}`} speed={50} step={0.25} />
+            </div>
+            <div className="q-chip-sub">{ratePct == null ? 'NO TITHE RECEIVED' : ratePct >= 0 ? `${ratePct}% SAVED` : `${Math.abs(ratePct)}% OVERDRAWN`}</div>
+          </div>
+        </div>
+
+        {/* the decree */}
+        <div className="q-body">
+          {!hasCats
+            ? <div className="q-empty">◈ NO EXPENDITURE DOCTRINE ESTABLISHED</div>
+            : renderDecree()}
+        </div>
+      </div>
+    </>
+  );
+};
+
 // AuspexSlide
 const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }) => {
   const [mode, setMode] = useState('trends');
+
+  // Direction-aware scan-wipe between sub-views — same treatment the
+  // app uses between slides. Compare prev vs current against AUSPEX_MODES
+  // so moving rightward wipes forward, leftward wipes backward.
+  const prevModeRef = useRef('trends');
+  const [modeDirection, setModeDirection] = useState('forward');
+  useEffect(() => {
+    if (prevModeRef.current === mode) return;
+    const dir = AUSPEX_MODES.indexOf(mode) >= AUSPEX_MODES.indexOf(prevModeRef.current) ? 'forward' : 'backward';
+    setModeDirection(dir);
+    prevModeRef.current = mode;
+  }, [mode]);
   const [holdings, setHoldings] = useState([]);
   const [history, setHistory] = useState([]);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
@@ -1213,7 +1610,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
       {/* HEADER */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 15, flexShrink: 0 }}>
         <div className="panel mech-panel" style={{ padding: 15, display: 'flex', gap: 10 }}>
-          {['manifest', 'trends', 'upkeep', 'archive'].map(m => (
+          {AUSPEX_MODES.map(m => (
             <button key={m} className={`mech-btn${mode === m ? ' active' : ''}`}
               style={{ flex: 1, margin: 0, background: mode === m ? 'var(--border-hi)' : 'transparent', color: mode === m ? '#000' : 'var(--text-d)' }}
               onClick={() => setMode(m)}>{m.toUpperCase()}</button>
@@ -1241,7 +1638,8 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
         </div>
       </div>
 
-      {/* MANIFEST MODE: Portfolio Table */}
+      {/* MODE CONTENT — scan-wipes between sub-views like the app's slides */}
+      <SlideTransition slideKey={mode} direction={modeDirection}>
       {mode === 'archive' ? (
         <ArchiveView
           archiveMonth={archiveMonth}
@@ -1259,6 +1657,14 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
           trends={expenseTrends}
           expenseCategories={expenseCategories}
           todayMonth={todayMonth}
+          onInspect={(cat) => { setSelectedCategory(cat); setMode('trends'); }}
+        />
+      ) : mode === 'quota' ? (
+        <QuotaView
+          trends={expenseTrends}
+          expenseCategories={expenseCategories}
+          db={dbMetadata}
+          userId={userId}
           onInspect={(cat) => { setSelectedCategory(cat); setMode('trends'); }}
         />
       ) : mode === 'manifest' ? (
@@ -1384,6 +1790,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
           </div>
         </div>
       )}
+      </SlideTransition>
 
       {/* OVERRIDE MODAL */}
       <ManifestOverrideModal

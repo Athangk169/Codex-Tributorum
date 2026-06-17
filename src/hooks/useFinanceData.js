@@ -281,11 +281,19 @@ export const useFinanceData = (credentials) => {
     let activeMonth = null;
 
     // ── Data refresh ──
+    // Admin-rule seeding + obligation-rule bootstrap only need to run
+    // once per session. They used to run on every refresh — and refresh
+    // fires on every transaction sync — so the hot path was doing a full
+    // metadata_vault scan (inside the seed) just to early-return.
+    let initialised = false;
+
     const refreshData = async () => {
-      console.log("◈ [DATA] Starting refresh");
       try {
-        await seedInitialCategoriesFromAdmin(username, dbMetadata);
-        await CategorizationEngine.ensureObligationRules(dbMetadata, username);
+        if (!initialised) {
+          await seedInitialCategoriesFromAdmin(username, dbMetadata);
+          await CategorizationEngine.ensureObligationRules(dbMetadata, username);
+          initialised = true;
+        }
 
         const now              = new Date();
         const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;

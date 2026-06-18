@@ -735,7 +735,10 @@ const ArchiveView = ({ archiveMonth, setArchiveMonth, archiveData, archiveLoadin
           <div className="arch-stat">
             <div className="arch-stat-lbl">GROSS TITHE</div>
             <div className="arch-stat-val income">
-              <ScrambleText text={fmtINR(metrics.grossIncome)} speed={50} step={0.25} />
+              {/* Gross inflow = earned income + reimbursements received,
+                  matching Overview's GROSS TITHE. metrics.grossIncome alone
+                  equals netIncome (engine sets netIncome = grossIncome). */}
+              <ScrambleText text={fmtINR((metrics.grossIncome || 0) + (metrics.reimbursementsReceived || 0))} speed={50} step={0.25} />
             </div>
           </div>
           <div className="arch-stat">

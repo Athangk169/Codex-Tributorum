@@ -950,7 +950,9 @@ export default function MobileAuspex({ data, dbInvestments, dbTransactions, dbMe
                 <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>
                   <div className="kpi-lbl" style={{ fontSize: '8px' }}>GROSS TITHE</div>
                   <div className="kpi-val ok" style={{ fontSize: '14px' }}>
-                    <ScrambleText text={fmtINR(metrics.grossIncome)} speed={50} step={0.3} />
+                    {/* Gross inflow = earned income + reimbursements; grossIncome
+                        alone equals netIncome (engine sets netIncome = grossIncome). */}
+                    <ScrambleText text={fmtINR((metrics.grossIncome || 0) + (metrics.reimbursementsReceived || 0))} speed={50} step={0.3} />
                   </div>
                 </div>
                 <div style={{ padding: '8px', border: '1px solid var(--ba-border-lo)' }}>

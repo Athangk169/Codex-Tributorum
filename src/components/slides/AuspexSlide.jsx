@@ -1788,7 +1788,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
               <table className="investment-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-d)', zIndex: 1 }}>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['TICKER', 'SHARES', 'AVG', 'INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].map(h => (
+                    {['TICKER', 'SHARES', 'AVG', 'LTP', 'INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].map(h => (
                       <th key={h} style={{ padding: '10px 8px 10px 0', textAlign: ['INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].includes(h) ? 'right' : 'left', fontSize: 10, color: 'var(--text-d)' }}>{h}</th>
                     ))}
                   </tr>
@@ -1814,6 +1814,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                         </td>
                         <td style={{ padding: '10px 8px 10px 0', color: 'var(--text-d)' }}>{shares.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', color: 'var(--text-d)' }}>{avgPrice.toLocaleString()}</td>
+                        <td style={{ padding: '10px 8px 10px 0', color: 'var(--text-d)' }}>{currentPrice.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }}>{invested.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right', color: 'var(--text-d)' }}>{value.toLocaleString()}</td>
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>

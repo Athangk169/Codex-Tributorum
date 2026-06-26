@@ -19,6 +19,61 @@ const formatMonthLabel = (monthPrefix) => {
 
 const fmtINR = (n) => `${Math.round(n || 0).toLocaleString('en-IN')}`;
 
+// ── Money-weighted annual return (XIRR) ───────────────────────
+// Holding-period return ignores time, so it can't be compared
+// across portfolios that took contributions at different paces.
+// XIRR solves for the annual rate r where the dated cash flows
+// net to zero:  Σ cf_i / (1 + r)^(years since first flow) = 0.
+// Outflows (capital deployed) are negative, the final market
+// value positive. This weights every deployment by how long it
+// actually sat invested — the correct "annual return since day
+// one" for a portfolio that keeps adding capital, where a naive
+// CAGR off day-one would understate the true rate.
+const MS_PER_YEAR = 365 * 24 * 3600 * 1000;
+
+const computeXirr = (flows) => {
+  if (flows.length < 2) return null;
+  // A root only exists if money both went out and came back.
+  if (!flows.some(f => f.amount < 0) || !flows.some(f => f.amount > 0)) return null;
+
+  const t0 = flows[0].date.getTime();
+  const yrs = (f) => (f.date.getTime() - t0) / MS_PER_YEAR;
+  const npv = (r) => flows.reduce((acc, f) => acc + f.amount / Math.pow(1 + r, yrs(f)), 0);
+
+  // Newton-Raphson with a numerical derivative
+  let rate = 0.1;
+  for (let i = 0; i < 100; i++) {
+    const f0 = npv(rate);
+    const deriv = (npv(rate + 1e-6) - f0) / 1e-6;
+    if (!isFinite(deriv) || Math.abs(deriv) < 1e-12) break;
+    let next = rate - f0 / deriv;
+    if (!isFinite(next)) break;
+    next = Math.max(next, -0.9999); // a rate ≤ -100% is undefined
+    if (Math.abs(next - rate) < 1e-7) return next;
+    rate = next;
+  }
+
+  // Bisection fallback for cash-flow shapes Newton can't crack
+  let lo = -0.9999, hi = 100;
+  let flo = npv(lo), fhi = npv(hi);
+  if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return null;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const fm = npv(mid);
+    if (!isFinite(fm)) return null;
+    if (Math.abs(fm) < 1e-6 || (hi - lo) < 1e-9) return mid;
+    if (flo * fm < 0) { hi = mid; } else { lo = mid; flo = fm; }
+  }
+  return (lo + hi) / 2;
+};
+
+const shortMonthLabel = (monthPrefix) => {
+  if (!monthPrefix) return '';
+  const [y, m] = monthPrefix.split('-');
+  return new Date(Number(y), Number(m) - 1, 1)
+    .toLocaleString('en-GB', { month: 'short', year: 'numeric' }).toUpperCase();
+};
+
 const legacyManifestId = 'current_holdings';
 const manifestIdForUser = (userId) => `finance:investments:current:${userId || 'default'}`;
 
@@ -1593,6 +1648,37 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
   const totalPL = totalValue - totalInvested;
   const totalPLPct = totalInvested > 0 ? ((totalPL / totalInvested) * 100).toFixed(2) : '0.00';
 
+  // Annualized money-weighted return (XIRR) from the snapshot
+  // history: each month's rise in cost basis ≈ capital deployed
+  // that month (an outflow), liquidated at live market value as of
+  // the current month. Annualizing a sub-quarter track record just
+  // extrapolates noise, so below MIN_TENURE_YEARS we withhold the
+  // figure rather than print a wild number; the SINCE label always
+  // states the window. Time is measured off todayMonth (not the raw
+  // clock) so the computation stays a pure function of render inputs.
+  const MIN_TENURE_YEARS = 0.25;
+  const annualReturn = (() => {
+    if (history.length < 2 || totalValue <= 0) return { rate: null, since: null };
+    const sorted = [...history].sort((a, b) => a.month.localeCompare(b.month));
+    const flows = [];
+    let prevInvested = 0;
+    sorted.forEach((s, i) => {
+      const invested = Number(s.invested) || 0;
+      const delta = i === 0 ? invested : invested - prevInvested;
+      prevInvested = invested;
+      if (Math.abs(delta) < 1) return; // skip months with no net deployment
+      const [y, m] = s.month.split('-').map(Number);
+      flows.push({ amount: -delta, date: new Date(y, m - 1, 1) });
+    });
+    if (!flows.length) return { rate: null, since: null };
+    const [ty, tm] = todayMonth.split('-').map(Number);
+    const liquidation = new Date(ty, tm, 1); // first day of the month after todayMonth
+    const tenureYears = (liquidation.getTime() - flows[0].date.getTime()) / MS_PER_YEAR;
+    if (tenureYears < MIN_TENURE_YEARS) return { rate: null, since: sorted[0].month };
+    flows.push({ amount: totalValue, date: liquidation });
+    return { rate: computeXirr(flows), since: sorted[0].month };
+  })();
+
   return (
     <div className="slide-container active" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 15 }}>
       {/* MANIFEST STYLES */}
@@ -1618,10 +1704,6 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
               style={{ flex: 1, margin: 0, background: mode === m ? 'var(--border-hi)' : 'transparent', color: mode === m ? '#000' : 'var(--text-d)' }}
               onClick={() => setMode(m)}>{m.toUpperCase()}</button>
           ))}
-          {mode === 'manifest' && (
-            <button className="mech-btn ok" style={{ flex: 1, margin: 0, borderColor: 'var(--border-hi)', color: 'var(--border-hi)', background: 'rgba(34,197,94,0.05)' }}
-              onClick={() => { setEditingHolding(null); setIsModalOpen(true); }}>+ ASSET</button>
-          )}
         </div>
         <div className="panel mech-panel" style={{ padding: 15, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -1632,11 +1714,31 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
             <div className="kpi-lbl">MARKET VALUE</div>
             <div className="kpi-val" style={{ fontSize: 18 }}><ScrambleText text={`${totalValue.toLocaleString()}`} /></div>
           </div>
-          <div style={{ textAlign: 'right' }}>
+          <div>
             <div className="kpi-lbl">NET YIELD</div>
             <div className={`kpi-val${totalPL >= 0 ? ' ok' : ' warn'}`} style={{ fontSize: 18 }}>
               <ScrambleText text={`${totalPL >= 0 ? '+' : '-'}${Math.abs(totalPL).toLocaleString()} (${totalPLPct}%)`} />
             </div>
+          </div>
+          <div style={{ textAlign: 'right' }} title="Annualized money-weighted return (XIRR) since the first recorded holding — weights each deployment by how long it has been invested. A truer performance figure than NET YIELD, which ignores time.">
+            <div className="kpi-lbl">ANNUAL YIELD</div>
+            {annualReturn.rate !== null ? (
+              <>
+                <div className={`kpi-val${annualReturn.rate >= 0 ? ' ok' : ' warn'}`} style={{ fontSize: 18 }}>
+                  <ScrambleText text={`${annualReturn.rate >= 0 ? '+' : '-'}${Math.abs(annualReturn.rate * 100).toFixed(1)}% p.a.`} />
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--ba-gold-mute)', letterSpacing: 1, marginTop: 2 }}>
+                  SINCE {shortMonthLabel(annualReturn.since)}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="kpi-val" style={{ fontSize: 18, color: 'var(--ba-gold-mute)' }}>— p.a.</div>
+                <div style={{ fontSize: 9, color: 'var(--ba-gold-mute)', letterSpacing: 1, marginTop: 2 }}>
+                  {annualReturn.since ? 'AWAITING TENURE' : 'NO HISTORY'}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1672,7 +1774,11 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
         />
       ) : mode === 'manifest' ? (
         <div className="panel mech-panel" style={{ padding: 20, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div className="sec-ttl">PORTFOLIO MATRIX</div>
+          <div className="sec-ttl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span>PORTFOLIO MATRIX</span>
+            <button className="mech-btn ok" style={{ width: 'auto', flex: '0 0 auto', margin: 0, padding: '7px 14px', borderColor: 'var(--border-hi)', color: 'var(--border-hi)', background: 'rgba(34,197,94,0.05)' }}
+              onClick={() => { setEditingHolding(null); setIsModalOpen(true); }}>+ ASSET</button>
+          </div>
           {holdings.length === 0 ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-d)', fontSize: 12 }}>
               NO HOLDINGS — INITIATE A NEW ASSET TO BEGIN

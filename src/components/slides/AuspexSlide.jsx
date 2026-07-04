@@ -1612,6 +1612,22 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
     }
   };
 
+  const deleteHoldingFromVault = async (holding) => {
+    if (!dbInvestments) return;
+    if (!window.confirm(`PURGE ${holding.ticker} FROM THE MANIFEST?\nTHIS RITE CANNOT BE UNDONE.`)) return;
+    try {
+      const { doc, id: manifestId } = await getCurrentManifest(dbInvestments, userId);
+      doc._id = manifestId;
+      doc.type = doc.type || 'finance:investments:manifest';
+      doc.assets = (doc.assets || []).filter(a => a.ticker !== holding.ticker);
+      doc.holdings_updated = new Date().toISOString();
+      await dbInvestments.put(doc);
+      setHoldings((doc.assets ?? []).map(normalizeAsset));
+    } catch (err) {
+      console.error('VAULT REJECTION:', err);
+    }
+  };
+
   const isAllYears = selectedYear === 'ALL';
   const filteredExpenses = isAllYears
     ? expenseTrends
@@ -1791,6 +1807,7 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                     {['TICKER', 'SHARES', 'AVG', 'LTP', 'INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].map(h => (
                       <th key={h} style={{ padding: '10px 8px 10px 0', textAlign: ['INVESTED', 'CUR. VALUE', 'P&L', 'P&L %'].includes(h) ? 'right' : 'left', fontSize: 10, color: 'var(--text-d)' }}>{h}</th>
                     ))}
+                    <th style={{ padding: '10px 0', textAlign: 'right', fontSize: 10, color: 'var(--text-d)', width: 36 }}>PURGE</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1820,8 +1837,13 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                         <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
                           {pl >= 0 ? '+' : ''}{pl.toLocaleString()}
                         </td>
-                        <td style={{ padding: '10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
+                        <td style={{ padding: '10px 8px 10px 0', textAlign: 'right' }} className={pl >= 0 ? 'ok' : 'warn'}>
                           {pl >= 0 ? '+' : ''}{plPct.toFixed(2)}%
+                        </td>
+                        <td style={{ padding: '10px 0', textAlign: 'right' }}>
+                          <button className="mech-btn warn" title="PURGE HOLDING FROM MANIFEST"
+                            style={{ margin: 0, padding: '4px 8px', fontSize: 11, width: 'auto', borderColor: 'var(--red)', color: 'var(--red)', background: 'rgba(248,113,113,0.1)' }}
+                            onClick={() => deleteHoldingFromVault(ast)}>✕</button>
                         </td>
                       </tr>
                     );

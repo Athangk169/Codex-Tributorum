@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AudioCore } from '../../utils/audioCore';
+import { canExtractTithe, extractFullTithe } from '../../utils/dataTithe';
 
 // ── SystemFooter — Mechanicum / Blood Angels blend ────────────
 //
@@ -73,8 +74,24 @@ const FOOTER_STYLES = `
   }
 `;
 
-const SystemFooter = () => {
+const SystemFooter = ({ user, dbs }) => {
   const [isMuted, setIsMuted] = useState(false);
+  // idle | scribing | rendered | malfunction
+  const [titheState, setTitheState] = useState('idle');
+
+  const handleTithe = async () => {
+    if (titheState === 'scribing') return;
+    try { AudioCore?.playSFX?.('click'); } catch { /* vox optional */ }
+    setTitheState('scribing');
+    try {
+      await extractFullTithe(dbs, user);
+      setTitheState('rendered');
+    } catch (err) {
+      console.error('◈ DATA-TITHE FAILURE:', err);
+      setTitheState('malfunction');
+    }
+    setTimeout(() => setTitheState('idle'), 4000);
+  };
 
   const handleVoxToggle = () => {
     try {
@@ -147,6 +164,42 @@ const SystemFooter = () => {
             ))}
           </div>
         </div>
+
+        {/* ── RIGHT: Data-tithe extraction (Sanguinius only) ── */}
+        {canExtractTithe(user) && dbs?.txns && (
+          <button
+            type="button"
+            onClick={handleTithe}
+            title="Extract the full archive as an Excel workbook"
+            style={{
+              background:    titheState === 'malfunction' ? 'rgba(204, 34, 0, 0.08)' : 'transparent',
+              border:        'none',
+              borderLeft:    '1px solid #4a0a00',
+              color:         {
+                idle:        '#b8923e',
+                scribing:    '#c9a84c',
+                rendered:    '#4ade80',
+                malfunction: '#cc2200',
+              }[titheState],
+              padding:       '0 18px',
+              cursor:        titheState === 'scribing' ? 'wait' : 'pointer',
+              fontFamily:    'var(--mono)',
+              fontSize:      '10px',
+              height:        '100%',
+              letterSpacing: '1px',
+              transition:    'all 0.3s ease',
+              textShadow:    '0 0 6px #b8923e44',
+              flexShrink:    0,
+            }}
+          >
+            [ TITHE: {{
+              idle:        'EXTRACT',
+              scribing:    'SCRIBING…',
+              rendered:    'RENDERED',
+              malfunction: 'MALFUNCTION',
+            }[titheState]} ]
+          </button>
+        )}
 
         {/* ── RIGHT: VOX toggle ── */}
         <button

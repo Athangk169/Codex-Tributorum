@@ -68,6 +68,15 @@ couchdb-dump -H laptop-lg23d2mc.taild8bd6e.ts.net -P 443 -d finances `
   -u admin -p <password> --insecure --quiet > "backups/finances-$ts.couch"
 ```
 
+**Easiest — in-app data-tithe (no credentials needed):**
+
+Log in on desktop as Sanguinius and click `[ TITHE: EXTRACT ]` in the footer.
+Downloads a `codex_tributorum_tithe_<date>.xlsx` with every document from all
+three databases (one sheet per doc type, nested fields as JSON in their cells).
+Works offline; readable in Excel; restorable via `scripts/restore.mjs` (see §4).
+Does NOT include: CouchDB user accounts, `_security` objects, design docs, or
+revision history — after a from-scratch restore, redo §5b for those.
+
 **Recommended cadence**: weekly while in active use, monthly otherwise.
 Schedule via Windows Task Scheduler if you want it automated.
 
@@ -96,6 +105,21 @@ $body | curl.exe -sk -u "${u}:${p}" -X POST "$h/finances/_bulk_docs" `
 
 Repeat for the other two databases. The `_rev` fields in the dump will be replayed,
 so you get the exact same revision history (provided you're restoring into a clean DB).
+
+**From a data-tithe workbook (`.xlsx`):**
+
+```powershell
+$env:COUCH_USER = "admin"; $env:COUCH_PASS = "<password>"
+node scripts/restore.mjs backups/codex_tributorum_tithe_2026-07-05.xlsx `
+  https://laptop-lg23d2mc.taild8bd6e.ts.net/db
+```
+
+Creates the three databases if missing and bulk-writes every document. Docs that
+already exist are skipped and counted (safe to run against a half-populated DB);
+add `--overwrite` to replace them instead. `--dry-run` parses the workbook and
+reports what would be written without touching the network. Fresh revisions are
+minted (the workbook's `_rev` column is informational only). User accounts and
+`_security` are not in the workbook — redo §5b after a from-scratch restore.
 
 ## 5. Add a new user (friend)
 

@@ -158,7 +158,7 @@ function App() {
         </SlideTransition>
       </main>
 
-      <SystemFooter user={credentials?.username} />
+      <SystemFooter user={credentials?.username} dbs={dbs} />
     </CrtShell>
     </>
   );

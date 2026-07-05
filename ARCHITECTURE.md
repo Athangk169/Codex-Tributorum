@@ -62,7 +62,9 @@ src/
 │   │                       See § 4. Engine modules.
 │   ├── couchAuth.js      # /_session POST/DELETE wrappers
 │   ├── audioCore.js      # BGM + SFX
-│   └── slideOrder.js     # nav order → direction calc (forward/backward swipes)
+│   ├── slideOrder.js     # nav order → direction calc (forward/backward swipes)
+│   └── dataTithe.js      # admin-only full-DB .xlsx export; lazy-loads SheetJS.
+│                           Restore counterpart: scripts/restore.mjs
 │
 ├── components/
 │   ├── CrtShell.jsx      # desktop frame with CRT effects
@@ -72,7 +74,7 @@ src/
 │   │   ├── BootScreen.jsx      # desktop login + boot terminal
 │   │   ├── ImperialHeader.jsx  # desktop top bar (KPIs marquee)
 │   │   ├── TacticalNav.jsx     # desktop slide nav
-│   │   ├── SystemFooter.jsx    # desktop footer
+│   │   ├── SystemFooter.jsx    # desktop footer (lore ticker, VOX, admin data-tithe)
 │   │   ├── CrtAmbient.jsx      # scanlines/flicker layer (z 9500)
 │   │   ├── TimeOfDayTint.jsx   # day/night colour overlay (z 9998)
 │   │   ├── IdleLitanyOverlay.jsx  # 60s-idle prayer scroll (z 9999)

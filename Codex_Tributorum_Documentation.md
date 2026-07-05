@@ -139,7 +139,10 @@ Codex-Tributorum/
 │   │   └── useBudgets.js        # Per-category monthly spending caps (quotas)
 │   └── utils/
 │       ├── engine.js            # Core finance calculation engines
-│       └── audioCore.js         # BGM and SFX audio system
+│       ├── audioCore.js         # BGM and SFX audio system
+│       └── dataTithe.js         # Admin-only full-DB Excel export (footer button)
+├── scripts/
+│   └── restore.mjs              # Rebuild CouchDB from a data-tithe .xlsx backup
 ├── public/
 │   └── sw.js                    # Service worker (offline caching)
 ├── android/                     # Capacitor Android project
@@ -285,7 +288,7 @@ The `@google/model-viewer` version `^4.2.0` supports augmented reality (AR) on A
 | `BootScreen` | Login / credential entry screen shown before the app loads |
 | `ImperialHeader` | Top bar with net worth metrics, sync LED, and user callsign |
 | `TacticalNav` | Horizontal navigation bar for switching slides |
-| `SystemFooter` | Bottom status bar |
+| `SystemFooter` | Bottom status bar: lore ticker, VOX mute toggle, and admin-only `[ TITHE: EXTRACT ]` full-database Excel backup (Sanguinius only — see OPERATIONS.md §3) |
 
 ### Mobile Layout Components
 

@@ -4,6 +4,23 @@
 
 ---
 
+## Recent Changes — Catch-Up Log
+
+Reverse-chronological summary of features landed recently, for re-orienting after time away. Details in the linked sections.
+
+| Date | Change |
+|------|--------|
+| 2026-07-07 | **Munitorum provision vaults** — new desktop-only MUNITORUM slide: label FDs into named buckets (China Trip, General…) layered over the ledger's Provisions pool; consign / reclaim / redeem workflow with derived unallocated reconciliation. No interest math — interest is logged as plain income. See §5.1 `ProvisionEngine`, §14.9. |
+| 2026-07-05 | **Data-tithe** — admin-only `[ TITHE: EXTRACT ]` full-database Excel export in the footer + restore script (Sanguinius only). |
+| 2026-07-04 | Auspex Manifest: per-holding **PURGE** button to delete investments. |
+| 2026-06-26 | Auspex: **LTP column** (daemon's live price/share) and **XIRR** — annualized money-weighted return. |
+| 2026-06-18 | Auspex: **per-category budget quotas** ("Munitorum Tithe-Grant" panel — predates and is unrelated to the Munitorum slide above); Archive GROSS TITHE now shows gross inflow. |
+| 2026-06-15 | **Loans feature removed** entirely (EMIs + recurring kept; historical loan transactions still honoured by the engine's guards). |
+| 2026-06-12 | Auspex UPKEEP mode (trailing monthly burn rate per category, FLUX badges); transfer credit fix (deposits credit the account they were logged against); EMI payments count as spending. |
+| 2026-06-11 | Server hardening: SERVER.md + deploy/ migration plan, service-worker v4 offline shell, last third-party runtime fetch removed. |
+
+---
+
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
@@ -161,7 +178,7 @@ Codex-Tributorum/
 
 ### 5.1 Finance Engine (`engine.js`)
 
-Located at `src/utils/engine.js`, this file is the computational heart of the app. It exports four distinct engines:
+Located at `src/utils/engine.js`, this file is the computational heart of the app. It exports five distinct engines:
 
 ---
 
@@ -219,6 +236,22 @@ Provides CRUD access for bank accounts and credit cards stored in the metadata d
 
 ---
 
+#### `ProvisionEngine`
+
+Powers the Munitorum slide (provision vaults). Vault docs name the buckets; append-only **movement** docs shift amounts between the derived `unallocated` pool and vaults. The ledger's Provisions total (fed by the `Provisions` / `Provision Sweep` transfer routes) remains the sole source of real money — vaults are a labelling layer and can never invent or lose any.
+
+| Method | Description |
+|--------|-------------|
+| `getAll(metadataDB, userId)` | Returns all vault (`finance:provision:*`) documents |
+| `add(name, targetAmount, metadataDB, userId)` | Creates a vault with an optional target sum |
+| `remove(provisionId, metadataDB, userId)` | Deletes a vault (UI only allows this at zero balance) |
+| `getMovements(metadataDB, userId)` | Returns all movement (`finance:provmove:*`) documents |
+| `addMovement({from, to, amount, date, note, maturityDate}, db, userId)` | Appends a movement; a `maturityDate` marks the entry as an FD |
+| `redeemMovement(movementId, db, userId)` | Writes the reversing movement back to `unallocated` and flips the original to `redeemed` |
+| `computeAllocation(bucketDocs, movements, poolTotal)` | Pure fold: returns `{ byBucket, allocated, unallocated }` where `unallocated = poolTotal − allocated` — negative means the vaults claim more than the ledger holds |
+
+---
+
 ### 5.2 Data Hook (`useFinanceData.js`)
 
 **`src/hooks/useFinanceData.js`** — The primary React hook that connects the UI to PouchDB. It:
@@ -269,6 +302,7 @@ The app uses a "slide" navigation metaphor — each major view is a full-screen 
 | `liquidity` | `LiquiditySlide` | `MobileLiquidity` | Cash flow forecasting and liquidity analysis |
 | `holo` | `HoloSlide` | `MobileHolo` | HTML holographic visualizations + interactive `.glb` 3D models via `<model-viewer>` |
 | `bank` | `BankAccountsSlide` | `MobileBank` | Bank accounts and credit card management, card billing buckets |
+| `provisions` | `ProvisionsSlide` | *(desktop only)* | **MUNITORUM tab** — provision vaults: label FDs into named buckets (China Trip, General…) layered over the ledger's Provisions pool; consign/reclaim/redeem workflow (see §14.9) |
 | `obligations` | `ObligationsSlide` | *(desktop only)* | Recurring expenses, EMI purchases |
 
 ### HoloSlide — 3D & Holographic Display
@@ -345,6 +379,8 @@ Stores all configuration, account definitions, category rules, and monthly snaps
 | `finance:config:routes` | Category-to-account routing table (system-wide) |
 | `finance:config:analytics` | Analytics configuration (system-wide) |
 | `finance:snapshot:{userId}:{YYYY-MM}` | Monthly balance snapshot for trend data |
+| `finance:provision:{userId}:prov_{ts}` | Provision vault (named FD bucket, optional target sum) |
+| `finance:provmove:{userId}:mv_{ts}` | Provision movement — append-only allocation entry between `unallocated` and a vault; optional `maturity_date` marks it as an FD, `status` flips to `redeemed` on redemption |
 
 ### `investments_vault` (Investments Database)
 
@@ -640,6 +676,8 @@ All PouchDB/CouchDB documents use a namespaced ID scheme for clarity and to enab
 | `finance:config:routes` | `metadata_vault` | Transfer routing table |
 | `finance:config:analytics` | `metadata_vault` | Analytics settings |
 | `finance:snapshot:{userId}:{YYYY-MM}` | `metadata_vault` | Monthly balance snapshot |
+| `finance:provision:{userId}:prov_{ts}` | `metadata_vault` | Provision vault (FD bucket) |
+| `finance:provmove:{userId}:mv_{ts}` | `metadata_vault` | Provision movement entry |
 | `finance:investments:current:{userId}` | `investments_vault` | Live investment manifest |
 | `finance:investments:snapshot:{userId}:{YYYY-MM}` | `investments_vault` | Monthly investment snapshot |
 
@@ -728,6 +766,34 @@ Typical workflow:
 ### 14.8 Obligations
 
 The Obligations slide tracks recurring expenses and consumer EMI purchases. Recurring expenses are matched against ledger transactions inside the current billing cycle. EMI purchases are calculated from metadata plus tagged transactions.
+
+### 14.9 Munitorum (Provision Vaults)
+
+The bank does not let you label a fixed deposit "China Trip" — the MUNITORUM slide (desktop only, added 2026-07-07) does. Named **vaults** pool one or more FDs each, so a fund grows across multiple deposits.
+
+**The two-layer model:**
+
+- **Ledger (real money, source of truth):** the `Provisions` category (Bank → pool) books an FD; `Provision Sweep` (pool → Bank) returns principal. The pool total is `buckets.Provisions` from balance reconstruction.
+- **Allocation (meaning, this slide):** movement entries assign pool money to vaults. The header always shows `UNALLOCATED = pool − Σ vault balances` — **derived, never stored**, so vaults can never silently drift from the ledger.
+
+**Booking an FD:** book at the bank → log a `Provisions` transaction in the Ledger (any device, including mobile — no new fields) → on Munitorum, **+ CONSIGN** the amount into a vault, with optional FD maturity date and note (e.g. `SBI FD @7.2%`).
+
+**Redeeming a matured FD** (say ₹50,000 principal + ₹3,600 interest):
+
+1. Ledger: `Provision Sweep` for the **principal** (₹50,000).
+2. Ledger: ordinary income transaction for the **interest** (₹3,600). Interest never passes through the pool — the app does no interest math at all; the pool and vaults carry principal only.
+3. Munitorum: the FD entry shows a pulsing **MATURED** badge once its date passes — click **REDEEM**. This appends the reversing movement and retires the entry to vault history.
+
+Order doesn't matter: doing the ledger half first shows a crimson **OVER-ALLOCATED** warning (vaults claim more than the ledger holds); doing the redeem first shows positive unallocated. Both clear when the two halves are done.
+
+**Renewal (bank rolls principal + interest):** log interest income + a `Provisions` transaction for the same amount (nets to zero on the bank, grows the pool), then REDEEM the old entry and CONSIGN the new total with the new maturity date.
+
+**Other actions:** `[ ESTABLISH VAULT ]` creates buckets (name + optional target sum, which drives the progress bar). **− RECLAIM** moves money back to unallocated. Vault-to-vault = reclaim + consign. **PURGE** appears only on empty vaults. Movements are append-only, so each vault card carries its complete audit history.
+
+| Unallocated shows | Meaning | Fix |
+|---|---|---|
+| Positive (gold) | Pool money not yet assigned | Consign it |
+| Negative (crimson OVER-ALLOCATED) | Sweep logged but nothing redeemed, or a provision txn edited/deleted | Redeem or reclaim the swept sum |
 
 ---
 

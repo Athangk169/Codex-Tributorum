@@ -156,7 +156,7 @@ Codex-Tributorum/
 
 ### 5.1 Finance Engine (`engine.js`)
 
-Located at `src/utils/engine.js`, this file is the computational heart of the app. It exports four distinct engines:
+Located at `src/utils/engine.js`, this file is the computational heart of the app. It exports five distinct engines:
 
 ---
 
@@ -214,6 +214,19 @@ Provides CRUD access for bank accounts and credit cards stored in the metadata d
 
 ---
 
+#### `ProvisionEngine`
+
+Powers the desktop-only MUNITORUM slide (provision vaults): named FD buckets layered over the ledger's Provisions pool. Vault docs (`finance:provision:*`) name the buckets; append-only movement docs (`finance:provmove:*`) shift amounts between the derived `unallocated` pool and vaults. The ledger stays the sole source of real money.
+
+| Method | Description |
+|--------|-------------|
+| `getAll` / `add` / `remove` | Vault CRUD (name + optional target sum; UI only deletes at zero balance) |
+| `getMovements` / `addMovement` | Movement entries; an optional `maturityDate` marks an entry as an FD |
+| `redeemMovement(movementId, db, userId)` | Appends the reversing movement to `unallocated` and flips the original to `redeemed` |
+| `computeAllocation(bucketDocs, movements, poolTotal)` | Returns `{ byBucket, allocated, unallocated }` with `unallocated = poolTotal − allocated` (derived, never stored) |
+
+---
+
 ### 5.2 Data Hook (`useFinanceData.js`)
 
 **`src/hooks/useFinanceData.js`** — The primary React hook that connects the UI to PouchDB. It:
@@ -264,6 +277,8 @@ The app uses a "slide" navigation metaphor — each major view is a full-screen 
 | `liquidity` | `LiquiditySlide` | `MobileLiquidity` | Cash flow forecasting and liquidity analysis |
 | `holo` | `HoloSlide` | `MobileHolo` | HTML holographic visualizations + interactive `.glb` 3D models via `<model-viewer>` |
 | `bank` | `BankAccountsSlide` | `MobileBank` | Bank accounts and credit card management, card billing buckets |
+| `provisions` | `ProvisionsSlide` | *(desktop only)* | **MUNITORUM tab** — provision vaults: label FDs into named buckets over the ledger's Provisions pool; consign / reclaim / redeem workflow |
+| `obligations` | `ObligationsSlide` | *(desktop only)* | Recurring expenses, EMI purchases |
 
 ### HoloSlide — 3D & Holographic Display
 
@@ -339,6 +354,8 @@ Stores all configuration, account definitions, category rules, and monthly snaps
 | `finance:config:routes` | Category-to-account routing table (system-wide) |
 | `finance:config:analytics` | Analytics configuration (system-wide) |
 | `finance:snapshot:{userId}:{YYYY-MM}` | Monthly balance snapshot for trend data |
+| `finance:provision:{userId}:prov_{ts}` | Provision vault (named FD bucket, optional target sum) |
+| `finance:provmove:{userId}:mv_{ts}` | Provision movement — append-only allocation entry between `unallocated` and a vault |
 
 ### `investments_vault` (Investments Database)
 

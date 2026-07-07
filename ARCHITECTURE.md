@@ -132,8 +132,10 @@ slides goes through `setActiveSlide(slide)`; `directionBetween(prev, next)` deci
 whether `SlideTransition` plays the forward (right→left) or backward (left→right)
 scan-wipe.
 
-Mobile has **no Obligations slide** — desktop-only. Everything else is
-1-to-1 mirrored.
+Mobile has **no Obligations slide** and **no Provisions (MUNITORUM) slide** —
+both desktop-only. Everything else is 1-to-1 mirrored. (Provision *transactions*
+are still logged from the mobile ledger as normal; only the vault-allocation UI
+is desktop-only.)
 
 ## 4. Engine modules
 
@@ -145,7 +147,7 @@ The slides never query PouchDB directly; they go through engines.
 | `CategorizationEngine` | Resolves a transaction's category by matching its description against keyword rules. Seeds obligation rules on first run. |
 | `TransferEngine` | Detects inter-account transfers (so they don't pollute income/expense totals). |
 | `CardEngine` | Builds the per-card "buckets" (statement periods → outstanding/paid). |
-| `ProvisionEngine` | Tracks money set aside for future spends. |
+| `ProvisionEngine` | Provision vaults (MUNITORUM slide): vault docs name FD buckets; append-only movement docs allocate the ledger's Provisions pool into them. `computeAllocation` derives `unallocated = pool − Σ vaults` — never stored, so vaults can't drift from the ledger. |
 | `AREngine` / `FinanceEngine.getARByTag` | Reimbursable receivables by tag. |
 | `FinanceEngine` | The big one — reconstructs monthly balances, gross income, gross expense, net income, net spend. Also bank account live balances. |
 | `TemporalEngine` | Ledger queries by month. |
@@ -174,7 +176,8 @@ finance:account:<user>:<account-id>          // accounts
 finance:card:<user>:<card-id>                // cards
 finance:recurring:<user>:<recurring-id>      // recurring obligations
 finance:emi:<user>:<emi-id>                  // EMIs (instalment purchases)
-finance:provision:<user>:<provision-id>      // earmarked funds
+finance:provision:<user>:<provision-id>      // provision vaults (named FD buckets)
+finance:provmove:<user>:<movement-id>        // vault allocation movements (append-only)
 finance:snapshot:<user>:<YYYY-MM>            // month boundary snapshots
 finance:config:categories:<user>             // per-user category-type config
 finance:investments:current:<user>           // investment manifest

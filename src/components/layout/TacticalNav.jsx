@@ -63,6 +63,7 @@ export const TacticalNav = ({ activeSlide, setActiveSlide }) => {
     { id: 'bank',         label: 'BANK'         },
     { id: 'auspex',       label: 'AUSPEX'       },
     { id: 'liquidity',    label: 'LIQUIDITY'    },
+    { id: 'provisions',   label: 'MUNITORUM'    },
     { id: 'obligations',  label: 'OBLIGATIONS'  },
     { id: 'holo',         label: 'RECON'        },
   ];

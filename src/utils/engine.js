@@ -486,6 +486,106 @@ export const ProvisionEngine = {
       if (doc.user_id === userId) await metadataDB.remove(doc);
       return { ok: true };
     } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // ── Movement entries ──
+  // Append-only ledger of allocations between the unallocated pool
+  // and buckets. The ledger's Provisions total is the anchor;
+  // unallocated is always derived (pool − sum of bucket balances),
+  // never stored, so buckets can never silently drift from reality.
+  //
+  //   { from: 'unallocated'|<prov id suffix>, to: same, amount,
+  //     date, note?, maturity_date?, status: 'active'|'redeemed' }
+  //
+  // An entry with maturity_date represents an FD parked in that
+  // bucket; redeeming it appends the reversing entry and flips the
+  // original's status so it moves to bucket history.
+
+  async getMovements(metadataDB, userId) {
+    try {
+      const result = await metadataDB.allDocs({
+        include_docs: true,
+        startkey: `finance:provmove:${userId}:`,
+        endkey:   `finance:provmove:${userId}:\uffff`
+      });
+      return result.rows.map(r => r.doc).filter(d => d.type === 'finance:provision_movement');
+    } catch (_) { return []; }
+  },
+
+  async addMovement({ from, to, amount, date, note = '', maturityDate = null }, metadataDB, userId) {
+    const amt = Math.abs(Number(amount) || 0);
+    if (!amt || !from || !to || from === to) return { ok: false, error: 'invalid_movement' };
+    try {
+      await metadataDB.put({
+        _id:           `finance:provmove:${userId}:mv_${Date.now()}`,
+        type:          'finance:provision_movement',
+        user_id:       userId,
+        from,
+        to,
+        amount:        amt,
+        date:          date || localDateStr(),
+        note,
+        maturity_date: maturityDate || null,
+        status:        'active',
+        created:       new Date().toISOString()
+      });
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // Redeem an FD allocation entry: reverse its amount back to the
+  // unallocated pool and retire the original entry. The matching
+  // ledger txn (Provision Sweep) is logged separately by the user;
+  // any mismatch surfaces as a nonzero unallocated figure.
+  async redeemMovement(movementId, metadataDB, userId) {
+    try {
+      const doc = await metadataDB.get(movementId);
+      if (doc.user_id !== userId)     return { ok: false, error: 'forbidden' };
+      if (doc.status === 'redeemed')  return { ok: false, error: 'already_redeemed' };
+      await metadataDB.put({
+        _id:      `finance:provmove:${userId}:mv_${Date.now()}`,
+        type:     'finance:provision_movement',
+        user_id:  userId,
+        from:     doc.to,
+        to:       'unallocated',
+        amount:   doc.amount,
+        date:     localDateStr(),
+        note:     `REDEEMED: ${doc.note || 'FD'}`,
+        maturity_date: null,
+        status:   'active',
+        redeems:  movementId,
+        created:  new Date().toISOString()
+      });
+      await metadataDB.put({ ...doc, status: 'redeemed', redeemed: new Date().toISOString() });
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message }; }
+  },
+
+  // Fold movements into per-bucket balances. poolTotal comes from
+  // the reconstructed ledger (buckets.Provisions); unallocated is
+  // the derived seam between the two — negative means the buckets
+  // claim more than the ledger holds (a redemption txn was logged
+  // but not yet redeemed here, or vice versa).
+  computeAllocation(bucketDocs, movements, poolTotal) {
+    const byBucket = {};
+    bucketDocs.forEach(b => {
+      byBucket[b._id.split(':').pop()] = { doc: b, balance: 0, entries: [] };
+    });
+
+    const sorted = [...movements].sort((a, b) => (a.created || '').localeCompare(b.created || ''));
+    sorted.forEach(mv => {
+      if (mv.from && byBucket[mv.from]) {
+        byBucket[mv.from].balance -= mv.amount;
+        byBucket[mv.from].entries.push({ ...mv, signed: -mv.amount });
+      }
+      if (mv.to && byBucket[mv.to]) {
+        byBucket[mv.to].balance += mv.amount;
+        byBucket[mv.to].entries.push({ ...mv, signed: +mv.amount });
+      }
+    });
+
+    const allocated = Object.values(byBucket).reduce((a, b) => a + b.balance, 0);
+    return { byBucket, allocated, unallocated: (poolTotal || 0) - allocated };
   }
 };
 

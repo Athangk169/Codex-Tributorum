@@ -39,6 +39,7 @@ import LiquiditySlide from './components/slides/LiquiditySlide';
 import HoloSlide from './components/slides/HoloSlide';
 import BankAccountsSlide from './components/slides/BankAccountsSlide';
 import ObligationsSlide from './components/slides/ObligationsSlide';
+import ProvisionsSlide from './components/slides/ProvisionsSlide';
 
 function App() {
   const isMobile = useIsMobile();
@@ -154,6 +155,7 @@ function App() {
             {activeSlide === 'holo'      && <HoloSlide        data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
             {activeSlide === 'bank'        && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
             {activeSlide === 'obligations' && <ObligationsSlide  data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'provisions'  && <ProvisionsSlide   data={financeData} dbMetadata={dbs?.meta} userId={credentials?.username} />}
           </SlideErrorBoundary>
         </SlideTransition>
       </main>

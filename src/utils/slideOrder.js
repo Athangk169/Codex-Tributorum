@@ -12,6 +12,7 @@ export const SLIDE_ORDER = [
   'bank',
   'auspex',
   'liquidity',
+  'provisions',
   'obligations',
   'holo',
 ];

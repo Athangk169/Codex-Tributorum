@@ -1109,9 +1109,10 @@ const QuotaView = ({ trends, expenseCategories, db, userId, onInspect }) => {
   // Real expense categories only. `expenseCategories` already drops
   // income/neutral, but it still lists every category *rule* — including
   // dormant, global, and system rules that never had a transaction.
-  // Intersect with categories that actually appear in the spend history
-  // (byCategory only ever holds non-income expenditure), mirroring the
-  // Upkeep matrix, so those non-real categories don't show here.
+  // Intersect with categories that actually appear in the spend history,
+  // mirroring the Upkeep matrix, so those non-real categories don't show
+  // here. The expenseSet check also drops the income/neutral keys that
+  // byCategory now carries for the Trends chart.
   const expenseSet = new Set(expenseCategories);
   const everSpent = new Set();
   trends.forEach(t => {
@@ -1464,6 +1465,10 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
   const expenseTrends = data?.trends ?? [];
   // FIX 1: Inherit the strictly filtered categories from useFinanceData.
   const expenseCategories = data?.expenseCategories ?? [];
+  // Income/neutral categories are chartable individually in Trends, but
+  // never enter the ALL EXPENSES sum below.
+  const positiveCategories = [...(data?.positiveCategories ?? [])].sort();
+  const neutralCategories  = [...(data?.neutralCategories ?? [])].sort();
 
   useEffect(() => {
     const fetchInvestments = async () => {
@@ -1867,9 +1872,21 @@ const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }
                   <option value="2025">2025</option>
                   <option value="2026">2026</option>
                 </select>
-                <select className="mech-select" style={{ width: 120, marginTop: 0 }} value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
+                <select className="mech-select" style={{ width: 140, marginTop: 0 }} value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
                   <option value="ALL">ALL EXPENSES</option>
-                  {expenseCategories.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  <optgroup label="── EXPENDITURE ──">
+                    {expenseCategories.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  </optgroup>
+                  {neutralCategories.length > 0 && (
+                    <optgroup label="── TRANSFERS ──">
+                      {neutralCategories.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                    </optgroup>
+                  )}
+                  {positiveCategories.length > 0 && (
+                    <optgroup label="── TITHES RECEIVED ──">
+                      {positiveCategories.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             </div>

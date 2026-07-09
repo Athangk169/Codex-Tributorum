@@ -1033,8 +1033,13 @@ export const AnalyticsEngine = {
           month: key, income: 0, expense: 0, investment: 0, net: 0, byCategory: {}
         };
 
-        if (isIncome && cat !== 'Reimbursement Received') {
-          months[key].income += amt;
+        if (isIncome) {
+          if (cat !== 'Reimbursement Received') months[key].income += amt;
+          // Income lands in byCategory too so individual income categories
+          // can be charted; expense-side consumers intersect byCategory
+          // with the expense category list, so these keys never leak into
+          // spend totals.
+          months[key].byCategory[cat] = (months[key].byCategory[cat] || 0) + amt;
         } else if (!isIncome && cat !== 'Reimbursement Received' && !txn.reimbursement_tag && !txn.is_reimbursable) {
           months[key].expense += amt;
           if (cat === 'Investment') months[key].investment += amt;

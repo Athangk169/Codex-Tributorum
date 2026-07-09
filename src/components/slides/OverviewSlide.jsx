@@ -388,6 +388,13 @@ const OV_STYLES = `
   .ov-ar-tag { color: var(--ba-gold-dim); letter-spacing: 1px; text-transform: uppercase; }
   .ov-ar-amt { color: var(--border-hi); font-weight: bold; font-family: var(--mono); }
 
+  /* Show every open AR tag; cap at ~4.5 rows so the half-visible row
+     signals there is more to scroll. */
+  .ov-ar-scroll { max-height: 132px; overflow-y: auto; padding-right: 4px; }
+  .ov-ar-scroll::-webkit-scrollbar       { width: 3px; }
+  .ov-ar-scroll::-webkit-scrollbar-track { background: #050000; }
+  .ov-ar-scroll::-webkit-scrollbar-thumb { background: rgba(204,34,0,0.5); border-radius: 2px; }
+
   .skull-dock {
     width: 68px; height: 68px; position: relative; flex-shrink: 0;
     border: 1px dashed rgba(74,222,128,0.22);
@@ -883,7 +890,8 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
               <div className="ov-ttl">RECOVERY MANIFEST</div>
               {openAR.length > 0 ? (
                 <>
-                  {openAR.slice(0, 4).map(([tag, amt]) => (
+                  <div className="ov-ar-scroll">
+                  {openAR.map(([tag, amt]) => (
                     <div key={tag} className="ov-ar-row">
                       <span className="ov-ar-tag">{tag}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -903,6 +911,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                       </div>
                     </div>
                   ))}
+                  </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid var(--ba-border-lo)', fontSize: '10px' }}>
                     <span style={{ color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>TOTAL OUTSTANDING</span>
                     <span style={{ color: 'var(--border-hi)', fontWeight: 'bold', fontFamily: 'var(--mono)' }}>

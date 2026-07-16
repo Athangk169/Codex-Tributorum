@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AREngine } from '../../utils/engine';
 import LoreTicker from '../shared/LoreTicker';
 import RecoveryDossier from '../shared/RecoveryDossier';
+import ExpenditureDossier from '../shared/ExpenditureDossier';
 
 // ── ScrambleText ──────────────────────────────────────────────
 const ScrambleText = ({ text, speed = 60, step = 0.08 }) => {
@@ -409,6 +410,14 @@ const OV_STYLES = `
   .ov-ar-scroll::-webkit-scrollbar-track { background: #050000; }
   .ov-ar-scroll::-webkit-scrollbar-thumb { background: rgba(204,34,0,0.5); border-radius: 2px; }
 
+  .ov-vec-row { cursor: crosshair; transition: background 0.15s, box-shadow 0.15s; padding: 2px 4px; margin: -2px -4px; }
+  .ov-vec-row:hover { background: rgba(200,34,0,0.06); box-shadow: inset 0 0 12px rgba(200,34,0,0.1); }
+
+  .ov-vec-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+  .ov-vec-scroll::-webkit-scrollbar       { width: 3px; }
+  .ov-vec-scroll::-webkit-scrollbar-track { background: #050000; }
+  .ov-vec-scroll::-webkit-scrollbar-thumb { background: rgba(204,34,0,0.5); border-radius: 2px; }
+
   .skull-dock {
     width: 68px; height: 68px; position: relative; flex-shrink: 0;
     border: 1px dashed rgba(74,222,128,0.22);
@@ -540,15 +549,19 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   // tracked accounts (the balance engine counts them in grossExpense too).
   const systemCats = new Set(['Loan Drawdown', 'Loan Payment', 'Opening Balance', 'Account Closure', 'Cash c/d']);
   const catSpend = {};
+  const catTxns  = {};
   txns.forEach(tx => {
     const cat = tx.category || 'UNCATEGORIZED';
     const tag = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
     if (systemCats.has(cat) || tx.loan_id) return;
     if (!positiveCats.includes(cat) && !neutralCats.includes(cat) && !tag) {
       catSpend[cat] = (catSpend[cat] || 0) + Math.abs(tx.amount || 0);
+      (catTxns[cat] = catTxns[cat] || []).push(tx);
     }
   });
-  const topCats = Object.entries(catSpend).sort((a,b) => b[1]-a[1]).slice(0, 5);
+  // All spend categories, largest first — the panel scrolls like the
+  // Recovery Manifest instead of truncating to a top-N.
+  const topCats = Object.entries(catSpend).sort((a,b) => b[1]-a[1]);
 
   // Trust the engine's all-time AR whenever present: an empty object means
   // "all settled", not "not loaded". The current-month fallback below is
@@ -564,6 +577,10 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   // the archive of settled tags. null = closed. Read-only — AR changes
   // only through Ledger entries.
   const [dossier, setDossier] = useState(null);
+
+  // Category drill-down: mirrors the AR dossier but for a spend vector.
+  // Read-only view over the cycle's transactions already on the slide.
+  const [vecCat, setVecCat] = useState(null);
 
   const recentTxns = txns.slice(0, 12);
   const streamData = [];
@@ -597,7 +614,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   return (
     <>
       <style>{OV_STYLES}</style>
-      <div ref={slideRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px', position: 'relative' }}>
+      <div ref={slideRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px', position: 'relative', overflow: 'hidden' }}>
         <ServoSkullOverview
           syncLed={syncLed}
           globalAuditState={globalAuditState}
@@ -662,8 +679,8 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '0.85fr 1.5fr 1fr', gap: '10px', flex: 1, minHeight: 0 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '0.85fr 1.5fr 1fr', gridTemplateRows: 'minmax(0, 1fr)', gap: '10px', flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflow: 'hidden' }}>
             <div className="ov-panel" style={{ padding: '12px 14px' }}>
               <div className="ov-ttl">SYSTEM UPLINK</div>
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -846,15 +863,15 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflow: 'hidden' }}>
+            <div className="ov-panel ov-target-hover" style={{ padding: '12px 14px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               <div className="ov-wm" style={{ backgroundImage: "url('/cog.jpeg')" }} />
               <div className="ov-ttl" style={{ position: 'relative', zIndex: 1 }}>EXPENDITURE VECTORS</div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-evenly', gap: '8px', position: 'relative', zIndex: 1 }}>
+              <div className="ov-vec-scroll" style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative', zIndex: 1 }}>
                 {topCats.length > 0 ? topCats.map(([cat, amt]) => {
                   const pct = Math.min((amt / (topCats[0]?.[1] || 1)) * 100, 100);
                   return (
-                    <div key={cat}>
+                    <div key={cat} className="ov-vec-row" onClick={() => setVecCat(cat)} title="OPEN EXPENDITURE LEDGER">
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--ba-gold-dim)', letterSpacing: '1px', marginBottom: '3px' }}>
                         <span>{cat.toUpperCase()}</span>
                         <span style={{ color: 'var(--text-d)' }}>{amt.toLocaleString()}</span>
@@ -924,6 +941,15 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
             onClose={() => setDossier(null)}
             dbTransactions={dbTransactions}
             userId={userId}
+          />
+        )}
+
+        {vecCat && (
+          <ExpenditureDossier
+            category={vecCat}
+            txns={catTxns[vecCat] || []}
+            resolveAcc={resolveAcc}
+            onClose={() => setVecCat(null)}
           />
         )}
       </div>

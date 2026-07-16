@@ -6,7 +6,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AREngine } from '../../utils/engine';
 
-const RD_STYLES = `
+// Shared with ExpenditureDossier — both overlays use the same scrim/panel
+// look; keep class names rd-* so either stylesheet copy works.
+export const RD_STYLES = `
   @keyframes rdScrimIn  { from { opacity: 0; } to { opacity: 1; } }
   @keyframes rdPanelIn  {
     from { opacity: 0; transform: translateY(10px) scale(0.985); }
@@ -123,7 +125,7 @@ const RD_STYLES = `
   .rd-back:hover { color: var(--ba-gold); }
 `;
 
-const fmtShortDate = (iso) => {
+export const fmtShortDate = (iso) => {
   if (!iso) return '--------';
   const [y, m, d] = iso.split('-');
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];

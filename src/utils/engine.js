@@ -604,25 +604,96 @@ export const AREngine = {
     return Object.values(arByTag || {}).reduce((a, b) => a + b, 0);
   },
 
+  // The ONE place that decides whether a transaction participates in AR
+  // and under which normalized tag. Every aggregator and the dossier
+  // must go through this, or the drill-down stops summing to the
+  // manifest total. Returns null for non-AR transactions.
+  resolveTag(tx) {
+    const raw       = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
+    const isReceipt = tx.category === 'Reimbursement Received';
+    if (!raw && !isReceipt) return null;
+    return { tag: (raw || 'untagged').toString().toLowerCase().trim(), isReceipt };
+  },
+
   computeFromTxns(txns) {
     const arByTag = {};
     (txns || []).forEach(tx => {
-      const tag       = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
-      const isReceipt = tx.category === 'Reimbursement Received';
-
-      if (!tag && !isReceipt) return;
-
-      const effectiveTag = (tag || 'untagged').toString().toLowerCase().trim();
-      const amt          = Math.abs(tx.amount || 0);
-
-      if (isReceipt) {
-        // Absolutely NO Math.max or delete allowed here
-        arByTag[effectiveTag] = (arByTag[effectiveTag] || 0) - amt;
-      } else {
-        arByTag[effectiveTag] = (arByTag[effectiveTag] || 0) + amt;
-      }
+      const res = this.resolveTag(tx);
+      if (!res) return;
+      const amt = Math.abs(tx.amount || 0);
+      // Absolutely NO Math.max or delete allowed here
+      arByTag[res.tag] = (arByTag[res.tag] || 0) + (res.isReceipt ? -amt : amt);
     });
     return Object.fromEntries(Object.entries(arByTag).filter(([, v]) => v > 0));
+  },
+
+  async _fetchAllTxns(transactionsDB, userId) {
+    const result = await transactionsDB.allDocs({
+      include_docs: true,
+      startkey: `txn:${userId}:`,
+      endkey:   `txn:${userId}:￿`
+    });
+    return result.rows.map(r => r.doc)
+      .filter(d => d?.type === 'transaction' && d.user_id === userId);
+  },
+
+  // Full chronological statement for one tag — charges (+), receipts (−),
+  // running balance per row. All-time query: the slides only hold the
+  // current month, but debts span months. The running balance is allowed
+  // to go negative (overpayment / orphan receipt) — this is an audit
+  // view, it shows the truth unclamped.
+  async getTagHistory(transactionsDB, userId, tag) {
+    const wanted = (tag || 'untagged').toString().toLowerCase().trim();
+    try {
+      const txns = await this._fetchAllTxns(transactionsDB, userId);
+      const entries = [];
+      txns
+        .sort((a, b) => (a.date || a._id).localeCompare(b.date || b._id))
+        .forEach(tx => {
+          const res = this.resolveTag(tx);
+          if (!res || res.tag !== wanted) return;
+          const amt = Math.abs(tx.amount || 0);
+          entries.push({
+            txnId:       tx._id,
+            date:        tx.date,
+            description: tx.description || 'UNKNOWN',
+            account:     tx.sub_account || null,
+            isReceipt:   res.isReceipt,
+            signed:      res.isReceipt ? -amt : amt,
+          });
+        });
+
+      let running = 0, charged = 0, received = 0;
+      entries.forEach(e => {
+        running += e.signed;
+        e.runningBalance = running;
+        if (e.isReceipt) received -= e.signed; else charged += e.signed;
+      });
+      return { tag: wanted, entries, totalCharged: charged, totalReceived: received, outstanding: running };
+    } catch (err) {
+      console.error('AREngine.getTagHistory error:', err);
+      return { tag: wanted, entries: [], totalCharged: 0, totalReceived: 0, outstanding: 0, error: err.message };
+    }
+  },
+
+  // Net balance per tag WITHOUT the >0 filter — settled and overpaid
+  // tags stay visible here so their history remains auditable after
+  // the manifest drops them.
+  async getAllTagBalances(transactionsDB, userId) {
+    try {
+      const txns  = await this._fetchAllTxns(transactionsDB, userId);
+      const byTag = {};
+      txns.forEach(tx => {
+        const res = this.resolveTag(tx);
+        if (!res) return;
+        const amt = Math.abs(tx.amount || 0);
+        byTag[res.tag] = (byTag[res.tag] || 0) + (res.isReceipt ? -amt : amt);
+      });
+      return byTag;
+    } catch (err) {
+      console.error('AREngine.getAllTagBalances error:', err);
+      return {};
+    }
   },
 
   getAllTags(txns) {
@@ -884,39 +955,10 @@ export const FinanceEngine = {
 
   async getARByTag(transactionsDB, userId) {
     try {
-      const result = await transactionsDB.allDocs({
-        include_docs: true,
-        startkey: `txn:${userId}:`,
-        endkey:   `txn:${userId}:\uffff`
-      });
-
-      const arByTag = {};
-
-      result.rows
-        .map(r => r.doc)
-        .filter(d => d.type === 'transaction' && d.user_id === userId)
-        .sort((a, b) => (a.date || a._id).localeCompare(b.date || b._id))
-        .forEach(tx => {
-          const tag       = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
-          const isReceipt = tx.category === 'Reimbursement Received';
-
-          if (!tag && !isReceipt) return;
-
-          const effectiveTag = (tag || 'untagged').toString().toLowerCase().trim();
-          const amt          = Math.abs(tx.amount || 0);
-
-          if (isReceipt) {
-            // Absolutely NO Math.max clamping allowed here
-            arByTag[effectiveTag] = (arByTag[effectiveTag] || 0) - amt;
-          } else {
-            arByTag[effectiveTag] = (arByTag[effectiveTag] || 0) + amt;
-          }
-        });
-
-      return Object.fromEntries(
-        Object.entries(arByTag).filter(([, v]) => v > 0)
-      );
-
+      // Delegates to AREngine so the manifest, the dossier drill-down
+      // and the ledger fallback all share ONE tag-resolution path.
+      const txns = await AREngine._fetchAllTxns(transactionsDB, userId);
+      return AREngine.computeFromTxns(txns);
     } catch (err) {
       console.error('FinanceEngine.getARByTag error:', err);
       return {};

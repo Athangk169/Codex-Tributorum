@@ -1,7 +1,8 @@
 // src/components/slides/OverviewSlide.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { localDateStr } from '../../utils/localDate';
+import { AREngine } from '../../utils/engine';
 import LoreTicker from '../shared/LoreTicker';
+import RecoveryDossier from '../shared/RecoveryDossier';
 
 // ── ScrambleText ──────────────────────────────────────────────
 const ScrambleText = ({ text, speed = 60, step = 0.08 }) => {
@@ -388,6 +389,19 @@ const OV_STYLES = `
   .ov-ar-tag { color: var(--ba-gold-dim); letter-spacing: 1px; text-transform: uppercase; }
   .ov-ar-amt { color: var(--border-hi); font-weight: bold; font-family: var(--mono); }
 
+  .ov-ar-row-audit { cursor: crosshair; transition: background 0.15s; }
+  .ov-ar-row-audit:hover { background: rgba(200,34,0,0.06); }
+  .ov-ar-row-audit:hover .ov-ar-tag { color: var(--ba-gold); }
+
+  .ov-ar-archive-btn {
+    display: block; width: 100%; margin-top: 8px;
+    background: transparent; border: none;
+    color: var(--ba-gold-mute); font-family: var(--mono); font-size: 8px;
+    letter-spacing: 2px; cursor: pointer; text-align: center;
+    padding: 3px 0; transition: color 0.2s;
+  }
+  .ov-ar-archive-btn:hover { color: var(--ba-gold); }
+
   /* Show every open AR tag; cap at ~4.5 rows so the half-visible row
      signals there is more to scroll. */
   .ov-ar-scroll { max-height: 132px; overflow-y: auto; padding-right: 4px; }
@@ -542,46 +556,14 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   // pending AR (cross-month receipts missing + clamping).
   const arByTag = data?.arByTag
     ? data.arByTag
-    : (() => {
-        const local = {};
-        txns.forEach(tx => {
-          const tag       = tx.reimbursement_tag || (tx.is_reimbursable ? 'untagged' : null);
-          const isReceipt = tx.category === 'Reimbursement Received';
-          
-          if (!tag && !isReceipt) return;
-          
-          const effectiveTag = (tag || 'untagged').toString().toLowerCase().trim();
-          const amt          = Math.abs(tx.amount || 0);
-          
-          if (isReceipt) {
-            // THE LEFTOVER MATH.MAX AND DELETE WERE WIPED OUT FROM HERE
-            local[effectiveTag] = (local[effectiveTag] || 0) - amt;
-          } else {
-            local[effectiveTag] = (local[effectiveTag] || 0) + amt;
-          }
-        });
-        return local;
-      })();
-      
+    : AREngine.computeFromTxns(txns);
+
   const openAR = Object.entries(arByTag).filter(([,a]) => a > 0).sort((a,b) => b[1]-a[1]);
 
-  const handleClearAR = useCallback(async (tag, amt) => {
-    if (!dbTransactions || !userId) return;
-    const suffix  = Math.random().toString(36).substring(2, 10);
-    const today   = localDateStr();
-    const defAcct = data?.accounts?.find(a => a.is_default && a.parent === 'Bank')?._id?.split(':').pop() || 'bank_hdfc';
-    await dbTransactions.put({
-      _id:               `txn:${userId}:${today}:${suffix}`,
-      type:              'transaction', user_id: userId,
-      date:              today,
-      description:       `Reimbursement from ${tag}`,
-      amount:            Math.round(amt),
-      category:          'Reimbursement Received',
-      account_type:      'Bank', sub_account: defAcct,
-      reimbursement_tag: tag, notes: null,
-      created_at:        new Date().toISOString(),
-    });
-  }, [dbTransactions, userId, data]);
+  // Debtor drill-down: { tag } opens one statement, { tag: null } opens
+  // the archive of settled tags. null = closed. Read-only — AR changes
+  // only through Ledger entries.
+  const [dossier, setDossier] = useState(null);
 
   const recentTxns = txns.slice(0, 12);
   const streamData = [];
@@ -892,23 +874,14 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                 <>
                   <div className="ov-ar-scroll">
                   {openAR.map(([tag, amt]) => (
-                    <div key={tag} className="ov-ar-row">
+                    <div
+                      key={tag}
+                      className="ov-ar-row ov-ar-row-audit"
+                      onClick={() => setDossier({ tag })}
+                      title="OPEN RECOVERY LEDGER"
+                    >
                       <span className="ov-ar-tag">{tag}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="ov-ar-amt">{Math.round(amt).toLocaleString()}</span>
-                        {dbTransactions && (
-                          <button
-                            onClick={() => handleClearAR(tag, amt)}
-                            style={{
-                              background: 'transparent', border: '1px solid var(--border)',
-                              color: 'var(--text-d)', fontFamily: 'var(--mono)', fontSize: '8px',
-                              padding: '2px 5px', cursor: 'pointer', letterSpacing: '1px', transition: 'all 0.2s',
-                            }}
-                            onMouseEnter={e => { e.target.style.borderColor = 'var(--border-hi)'; e.target.style.color = '#fff'; }}
-                            onMouseLeave={e => { e.target.style.borderColor = 'var(--border)';    e.target.style.color = 'var(--text-d)'; }}
-                          >CLEAR</button>
-                        )}
-                      </div>
+                      <span className="ov-ar-amt">{Math.round(amt).toLocaleString()}</span>
                     </div>
                   ))}
                   </div>
@@ -923,6 +896,11 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                 <div style={{ fontSize: '10px', color: '#7a4a20', textAlign: 'center', padding: '10px 0' }}>
                   ALL DEBTS CLEARED
                 </div>
+              )}
+              {dbTransactions && (
+                <button className="ov-ar-archive-btn" onClick={() => setDossier({ tag: null })}>
+                  ◈ ARCHIVED DEBTS
+                </button>
               )}
             </div>
 
@@ -939,6 +917,15 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
 
           </div>
         </div>
+
+        {dossier && dbTransactions && (
+          <RecoveryDossier
+            tag={dossier.tag}
+            onClose={() => setDossier(null)}
+            dbTransactions={dbTransactions}
+            userId={userId}
+          />
+        )}
       </div>
     </>
   );

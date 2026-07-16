@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { localDateStr } from '../../utils/localDate';
 import { CategorizationEngine, AREngine } from '../../utils/engine';
+import RecoveryDossier from '../shared/RecoveryDossier';
 
 // ── CryptoPlaceholder ─────────────────────────────────────────
 const CryptoPlaceholder = ({ text, active }) => {
@@ -197,6 +198,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const [lastAddedId,   setLastAddedId]   = useState(null);
   const [isDescFocused, setIsDescFocused] = useState(false);
   const [isAmtFocused,  setIsAmtFocused]  = useState(false);
+  const [dossierTag,    setDossierTag]    = useState(null);
 
   const resolveSubAccountInput = (raw) => {
     const value = (raw || '').trim();
@@ -823,7 +825,11 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
                           <div style={{ fontSize: '9px', color: 'var(--text-d)' }}>
                             {tx.category}
                             {tx.reimbursement_tag && (
-                              <span style={{ color: 'var(--border-hi)', marginLeft: '6px' }}>
+                              <span
+                                onClick={() => setDossierTag(tx.reimbursement_tag)}
+                                title="OPEN RECOVERY LEDGER"
+                                style={{ color: 'var(--border-hi)', marginLeft: '6px', cursor: 'crosshair', textDecoration: 'underline dotted', textUnderlineOffset: '2px' }}
+                              >
                                 [R: {tx.reimbursement_tag}]
                               </span>
                             )}
@@ -886,6 +892,15 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
         </div>
 
       </div>
+
+      {dossierTag && dbTransactions && (
+        <RecoveryDossier
+          tag={dossierTag}
+          onClose={() => setDossierTag(null)}
+          dbTransactions={dbTransactions}
+          userId={user}
+        />
+      )}
     </div>
   );
 };

@@ -148,7 +148,7 @@ function App() {
       <main className="system-content-layer">
         <SlideTransition slideKey={activeSlide} direction={slideDirection}>
           <SlideErrorBoundary slideName={activeSlide}>
-            {activeSlide === 'overview'  && <OverviewSlide    data={financeData} syncLed={syncLed} />}
+            {activeSlide === 'overview'  && <OverviewSlide    data={financeData} syncLed={syncLed} dbTransactions={dbs?.txns} userId={credentials?.username} />}
             {activeSlide === 'ledger'    && <LedgerSlide      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
             {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
             {activeSlide === 'liquidity' && <LiquiditySlide   data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}

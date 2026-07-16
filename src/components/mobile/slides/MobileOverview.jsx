@@ -1,6 +1,5 @@
 // src/components/slides/mobile/MobileOverview.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { localDateStr } from '../../../utils/localDate';
 import ScrambleText from '../../shared/ScrambleText';
 import LoreTicker from '../../shared/LoreTicker';
 
@@ -413,12 +412,6 @@ const STYLES = `
   }
   .mo-ar-tag { color: #b8923e; letter-spacing: 1px; text-transform: uppercase; font-family: var(--mono, monospace); }
   .mo-ar-amt { color: #e0c070; font-weight: bold; font-family: var(--mono, monospace); text-shadow: 0 0 6px rgba(224,192,112,0.35); }
-  .mo-ar-clear {
-    background: transparent; border: 1px solid #2a0800; color: #4a2010;
-    font-family: var(--mono, monospace); font-size: 8px; padding: 3px 7px;
-    cursor: pointer; letter-spacing: 1px; transition: border-color 0.2s, color 0.2s;
-  }
-  .mo-ar-clear:active { border-color: var(--border-hi, #4ade80); color: #fff; }
 
   /* ── KPI colour variants ── */
   .mo-val.amber  { color: #eab308; text-shadow: 0 0 8px #eab30877; }
@@ -476,7 +469,7 @@ const formatDateToText = (dateString) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
-export default function MobileOverview({ data, syncLed, dbTransactions, userId }) {
+export default function MobileOverview({ data, syncLed }) {
   const slideRef = useRef(null);
   const skullDockRef = useRef(null);
 
@@ -577,25 +570,6 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
         return local;
       })();
   const openAR = Object.entries(arByTag).filter(([,a]) => a > 0).sort((a,b) => b[1]-a[1]);
-
-  // ── Clear AR — log Reimbursement Received (matching desktop) ──
-  const handleClearAR = useCallback(async (tag, amt) => {
-    if (!dbTransactions || !userId) return;
-    const suffix  = Math.random().toString(36).substring(2, 10);
-    const today   = localDateStr();
-    const defAcct = data?.accounts?.find(a => a.is_default && a.parent === 'Bank')?._id?.split(':').pop() || 'bank_hdfc';
-    await dbTransactions.put({
-      _id:               `txn:${userId}:${today}:${suffix}`,
-      type:              'transaction', user_id: userId,
-      date:              today,
-      description:       `Reimbursement from ${tag}`,
-      amount:            Math.round(amt),
-      category:          'Reimbursement Received',
-      account_type:      'Bank', sub_account: defAcct,
-      reimbursement_tag: tag, notes: null,
-      created_at:        new Date().toISOString(),
-    });
-  }, [dbTransactions, userId, data]);
 
   // ── Stream data ──
   const recentTxns = txns.slice(0, 15);
@@ -793,14 +767,7 @@ export default function MobileOverview({ data, syncLed, dbTransactions, userId }
             {openAR.slice(0, 4).map(([tag, amt]) => (
               <div key={tag} className="mo-ar-row">
                 <span className="mo-ar-tag">{tag}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span className="mo-ar-amt">{Math.round(amt).toLocaleString()}</span>
-                  {dbTransactions && (
-                    <button className="mo-ar-clear" onClick={() => handleClearAR(tag, amt)}>
-                      CLEAR
-                    </button>
-                  )}
-                </div>
+                <span className="mo-ar-amt">{Math.round(amt).toLocaleString()}</span>
               </div>
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #2a0800', fontSize: '9px' }}>

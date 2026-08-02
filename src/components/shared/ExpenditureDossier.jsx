@@ -5,6 +5,8 @@
 // carries (no DB query — unlike AR, spend doesn't span months here).
 import { useState, useEffect } from 'react';
 import { RD_STYLES, fmtShortDate } from './RecoveryDossier';
+import QuotaLine, { QUOTA_STYLES } from './QuotaLine';
+import { quotaForCategory } from '../../utils/quota';
 
 const buildTransmitText = (category, entries, total) => {
   const lines = [`EXPENDITURE LEDGER — ${category.toUpperCase()}`, ''];
@@ -22,8 +24,12 @@ const buildTransmitText = (category, entries, total) => {
   return lines.join('\n');
 };
 
-const ExpenditureDossier = ({ category, txns, resolveAcc, onClose }) => {
+const ExpenditureDossier = ({ category, txns, resolveAcc, onClose, quota }) => {
   const [transmitted, setTransmitted] = useState(false);
+
+  // If this category is under a sanctioned tithe, show the cap right
+  // here — you're already looking at exactly the spend it governs.
+  const quotaLine = quotaForCategory(quota, category);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -59,7 +65,7 @@ const ExpenditureDossier = ({ category, txns, resolveAcc, onClose }) => {
 
   return (
     <div className="rd-scrim" onClick={onClose}>
-      <style>{RD_STYLES}</style>
+      <style>{RD_STYLES + QUOTA_STYLES}</style>
       <div className="rd-panel" onClick={e => e.stopPropagation()}>
         <span className="corner-tl"/><span className="corner-tr"/>
         <span className="corner-bl"/><span className="corner-br"/>
@@ -70,6 +76,12 @@ const ExpenditureDossier = ({ category, txns, resolveAcc, onClose }) => {
           </span>
           <button className="rd-x" onClick={onClose}>TERMINATE</button>
         </div>
+
+        {quotaLine && (
+          <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--ba-border-lo)' }}>
+            <QuotaLine line={quotaLine} paceFrac={quota?.paceFrac || 0} />
+          </div>
+        )}
 
         <div className="rd-cols">
           <span>DATE STAMP</span><span>DESIGNATION</span>

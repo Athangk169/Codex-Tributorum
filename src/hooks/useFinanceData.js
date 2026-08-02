@@ -10,6 +10,7 @@ import {
 } from "../utils/engine";
 import { couchEndpoint } from "../utils/couchAuth";
 import { localDateStr } from "../utils/localDate";
+import { computeQuota, summarizeQuota } from "../utils/quota";
 
 // ─────────────────────────────────────────────────────────────
 // useFinanceData
@@ -299,7 +300,7 @@ export const useFinanceData = (credentials) => {
         const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         activeMonth = currentMonthPrefix;
 
-        const [results, liveBalances, cardResults, accounts, cards, trends, arByTag, obligations] =
+        const [results, liveBalances, cardResults, accounts, cards, trends, arByTag, obligations, budgetRows] =
           await Promise.all([
             FinanceEngine.reconstructBalances(dbTransactions, dbMetadata, currentMonthPrefix, username),
             FinanceEngine.getBankAccountBalances(dbTransactions, dbMetadata, username),
@@ -309,7 +310,22 @@ export const useFinanceData = (credentials) => {
             AnalyticsEngine.getMonthlyTrends(dbTransactions, dbMetadata, username),
             FinanceEngine.getARByTag(dbTransactions, username),
             ObligationsEngine.getSummary(dbMetadata, dbTransactions, username),
+            // Per-category caps. Loaded here rather than in each consumer
+            // so the header, overview, nav, ledger and dossier all read
+            // one derivation and can't disagree. useBudgets still owns
+            // the write path in the Auspex quota view.
+            dbMetadata.allDocs({
+              include_docs: true,
+              startkey: `finance:budget:${username}:`,
+              endkey:   `finance:budget:${username}:￿`,
+            }).catch(() => ({ rows: [] })),
           ]);
+
+        const budgets = {};
+        (budgetRows?.rows || [])
+          .map(r => r.doc)
+          .filter(d => d?.type === 'finance:budget' && d.user_id === username)
+          .forEach(d => { budgets[d.category_name] = d; });
 
         // ── Genesis snapshot — marks the first reliable month ──
         // Anything before this was imported from the legacy system.
@@ -415,6 +431,23 @@ export const useFinanceData = (credentials) => {
           console.warn("◈ expenseCategories failed:", err);
         }
 
+        // ── Quota roll-up ──
+        // Derived once, after expenseCategories resolves (computeQuota
+        // needs it to tell real expense categories from dormant rules).
+        // Summarised to a plain object so it can ride on financeData
+        // without carrying the trend closures around.
+        let quota = null;
+        try {
+          quota = summarizeQuota(computeQuota({
+            trends: trends || [],
+            budgets,
+            expenseCategories,
+            now: new Date(),
+          }));
+        } catch (err) {
+          console.warn("◈ quota roll-up failed:", err);
+        }
+
         if (results) {
           setFinanceData({
             ...results,
@@ -429,6 +462,8 @@ export const useFinanceData = (credentials) => {
             trends:             trends || [],
             arByTag:            arByTag || {},
             genesisMonth,
+            budgets,
+            quota,
             obligations:        obligations || {
               recurring: [], emis: [],
               totalMonthlyLoad: 0, recurringMonthlyLoad: 0,

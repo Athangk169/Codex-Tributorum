@@ -143,10 +143,22 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
   const cardDebt    = financeData?.totalDebt ?? (buckets.Card || 0);
   const netPosition = (buckets.Bank || 0) + (buckets.Cash || 0) - cardDebt;
 
+  // TITHE stands in the marquee only once a quota is sanctioned —
+  // otherwise it would rotate an empty 0 past you all day. Reads the
+  // shared roll-up on financeData, so it always agrees with the decree.
+  const quota = financeData?.quota;
+
   const financialItems = [
     { label: 'NET POSITION', val: netPosition },
     { label: 'BANK RESERVE', val: buckets.Bank || 0 },
     { label: cardDebt < 0 ? 'CARD CREDIT' : 'DEBT LOAD', val: Math.abs(cardDebt) },
+    ...(quota && quota.count > 0
+      ? [{
+          label: quota.remains < 0 ? 'TITHE OVERDRAWN' : 'TITHE REMAINING',
+          val: Math.abs(quota.remains),
+          crit: quota.remains < 0,
+        }]
+      : []),
   ];
 
   const tickerItems = [];
@@ -204,12 +216,13 @@ export const ImperialHeader = ({ financeData, user, syncLed = 'idle' }) => {
               {[...tickerItems, ...tickerItems].map((item, i) =>
                 item.type === 'data' ? (
                   <span key={i} style={{
-                    padding: '0 32px', color: '#b8923e', fontWeight: 'bold',
+                    padding: '0 32px', color: item.crit ? '#cc2200' : '#b8923e', fontWeight: 'bold',
                     whiteSpace: 'nowrap', fontSize: '12px', letterSpacing: '1px',
                   }}>
                     {item.label}
                     <em style={{
-                      color: '#fff', textShadow: '0 0 8px #cc220099',
+                      color: item.crit ? '#ff6644' : '#fff',
+                      textShadow: item.crit ? '0 0 8px #cc2200cc' : '0 0 8px #cc220099',
                       fontStyle: 'normal', marginLeft: '10px', fontWeight: 'bold',
                     }}>
                       <NumberTick value={item.val} prefix="" />

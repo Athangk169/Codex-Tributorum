@@ -3,6 +3,7 @@ import { localMonthStr } from '../../utils/localDate';
 import ScrambleText from '../shared/ScrambleText';
 import { FinanceEngine } from '../../utils/engine';
 import { useBudgets } from '../../hooks/useBudgets';
+import { computeQuota, QUOTA_BADGE } from '../../utils/quota';
 import SlideTransition from '../shared/SlideTransition';
 
 // Auspex sub-view tabs, left→right. Order drives the scan-wipe
@@ -1064,17 +1065,10 @@ const UpkeepView = ({ trends, expenseCategories, todayMonth, onInspect }) => {
 // The verdict stamp reflects quota adherence, not cashflow.
 // ─────────────────────────────────────────────────────────────
 
-// ── Quota status (shared by all skins) ───────────────────────
-// paid = within cap · pending = on pace to exceed · met = fully
-// drawn (at the cap) · overdue = over. `met` uses a small tolerance
-// because spent is a float sum that rarely lands exactly on the cap.
-const quotaStatus = (spent, cap, paceFrac) => {
-  if (spent > cap) return 'overdue';
-  if (cap > 0 && spent >= cap - cap * 0.005) return 'met';   // within ~0.5% of cap = fully drawn (0-cap held at zero stays "within")
-  const projected = paceFrac > 0 ? spent / paceFrac : spent;
-  return projected > cap ? 'pending' : 'paid';
-};
-const QUOTA_BADGE = { paid: 'WITHIN', pending: 'NEARING', met: 'AT LIMIT', overdue: 'EXCEEDED' };
+// Quota status/badge and the whole row derivation now live in
+// src/utils/quota.js — shared with the Overview standing panel, the
+// header KPI, the nav seal, the ledger inscribe warning and the
+// expenditure dossier, so every surface agrees on the numbers.
 
 // Roman numerals for decree clause indices / grant dates.
 const toRoman = (n) => {
@@ -1087,81 +1081,24 @@ const toRoman = (n) => {
 const QuotaView = ({ trends, expenseCategories, db, userId, onInspect }) => {
   const { budgets, setBudget, removeBudget } = useBudgets(db, userId);
 
-  const now         = new Date();
-  const y           = now.getFullYear();
-  const mo          = now.getMonth();
-  const monthKey    = `${y}-${String(mo + 1).padStart(2, '0')}`;
+  const now = new Date();
+  const mo  = now.getMonth();
+  const y   = now.getFullYear();
   const dayOfMonth  = now.getDate();
   const daysInMonth = new Date(y, mo + 1, 0).getDate();
-  const paceFrac    = daysInMonth > 0 ? dayOfMonth / daysInMonth : 0;
 
-  const curByCat = (trends.find(t => t.month === monthKey)?.byCategory) || {};
-  const spendOf  = (cat) => Math.abs(curByCat[cat] || 0);
-
-  // Suggestion seed: average over up to 6 completed months in the ledger.
-  const completed = trends.filter(t => t.month < monthKey);
-  const last6     = completed.slice(-6);
-  const avgOf     = (cat) =>
-    last6.length ? last6.reduce((a, t) => a + Math.abs(t.byCategory?.[cat] || 0), 0) / last6.length : 0;
-
-  const capOf = (cat) => Number(budgets[cat]?.monthly_cap) || 0;
-
-  // Real expense categories only. `expenseCategories` already drops
-  // income/neutral, but it still lists every category *rule* — including
-  // dormant, global, and system rules that never had a transaction.
-  // Intersect with categories that actually appear in the spend history,
-  // mirroring the Upkeep matrix, so those non-real categories don't show
-  // here. The expenseSet check also drops the income/neutral keys that
-  // byCategory now carries for the Trends chart.
-  const expenseSet = new Set(expenseCategories);
-  const everSpent = new Set();
-  trends.forEach(t => {
-    const bc = t.byCategory || {};
-    for (const c in bc) if (expenseSet.has(c) && Math.abs(bc[c]) > 0) everSpent.add(c);
-  });
-  const active = [...everSpent];
-
-  // Already-budgeted expense categories always show (so a quota can be
-  // edited/cleared even if it went dormant); the "set a quota" list only
-  // offers active expense categories.
-  const sanctioned = expenseCategories
-    .filter(c => budgets[c])
-    .sort((a, b) => (spendOf(b) / (capOf(b) || 1)) - (spendOf(a) / (capOf(a) || 1)));
-  const unsanctioned = active.filter(c => !budgets[c])
-    .sort((a, b) => (spendOf(b) - spendOf(a)) || a.localeCompare(b)); // this-cycle spend first
-
-  const totalQuota = sanctioned.reduce((a, c) => a + capOf(c), 0);
-  const totalSpent = sanctioned.reduce((a, c) => a + spendOf(c), 0);
-  const remains    = totalQuota - totalSpent;
-
-  // ── Cycle reconciliation — ties the budget to actual income/expense.
-  // Read straight from the monthly trend, which already excludes
-  // reimbursements (income drops "Reimbursement Received"; expense drops
-  // reimbursable-tagged txns), so this matches Overview/Auspex exactly.
-  const cur          = trends.find(t => t.month === monthKey) || {};
-  const income       = Math.max(0, cur.income  || 0);
-  const totalExpense = Math.max(0, cur.expense || 0);
-  const net          = income - totalExpense;
-  const offTithe     = Math.max(0, totalExpense - totalSpent); // spend outside any sanctioned tithe
-  const ratePct      = income > 0 ? Math.round((net / income) * 100) : null;
-
-  const hasCats = sanctioned.length > 0 || unsanctioned.length > 0;
-
-  // Normalised render rows for the sanctioned categories.
-  const rows = sanctioned.map(cat => {
-    const cap = capOf(cat), spent = spendOf(cat);
-    const over = spent > cap;
-    // A 0 cap means "should stay at zero" — any spend is fully over.
-    const frac = cap > 0 ? spent / cap : (over ? 1 : 0);
-    return {
-      cat, cap, spent, frac,
-      pct: cap > 0 ? Math.round((spent / cap) * 100) : (over ? 100 : 0),
-      fillPct: Math.min(frac, 1) * 100,
-      st: quotaStatus(spent, cap, paceFrac),
-      over,
-      remaining: cap - spent,
-    };
-  });
+  // One shared derivation — see src/utils/quota.js. The write path
+  // (setBudget/removeBudget) still belongs to this view; useBudgets is
+  // kept local so edits stay optimistic and don't wait on a sync round
+  // trip through financeData.
+  const q = computeQuota({ trends, budgets, expenseCategories, now });
+  const {
+    monthKey, paceFrac, rows, sanctioned, unsanctioned,
+    totalQuota, totalSpent, remains,
+    income, totalExpense, net, offTithe, ratePct,
+    hasCats, stampWord, stampClass,
+    spendOf, avgOf,
+  } = q;
 
   // ── Shared inline edit state (used for both editing a cap and
   // sanctioning a new one — setBudget creates or updates). ──
@@ -1194,15 +1131,6 @@ const QuotaView = ({ trends, expenseCategories, db, userId, onInspect }) => {
   // ── Tithe-Decree — Mechanicus data-slate (dark/mono) + wax seals ──
   const todayStr  = `${String(dayOfMonth).padStart(2, '0')}.${String(mo + 1).padStart(2, '0')}.${y}`;
   const grantNo   = `${toRoman(mo + 1)}·${y}`;
-  // Verdict stamp reflects quota adherence (not cashflow): any cap
-  // breached → exceeded; any fully-drawn or on-pace-to-exceed → nearing;
-  // all clear → within; nothing sanctioned → unsealed.
-  const quotaVerdict = rows.length === 0 ? 'none'
-    : rows.some(r => r.over)                                   ? 'overdue'
-    : rows.some(r => r.st === 'pending' || r.st === 'met')    ? 'pending'
-    :                                                            'paid';
-  const stampWord  = { paid: 'WITHIN MEANS', pending: 'NEARING LIMIT', overdue: 'OVERDRAWN', none: 'UNSEALED' }[quotaVerdict];
-  const stampClass = { paid: 'ok',           pending: 'warn',          overdue: 'over',      none: 'none'     }[quotaVerdict];
 
   const renderDecree = () => (
     <div className="q-dec">
@@ -1434,13 +1362,17 @@ const QuotaView = ({ trends, expenseCategories, db, userId, onInspect }) => {
 };
 
 // AuspexSlide
-const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId }) => {
-  const [mode, setMode] = useState('trends');
+const AuspexSlide = ({ data, dbInvestments, dbTransactions, dbMetadata, userId, initialMode = null }) => {
+  // `initialMode` deep-links a sub-view (the Overview's Tithe-Grant panel
+  // and the nav seal both jump straight to 'quota'). Seeded once on mount
+  // — the slide unmounts on every nav change, so there's nothing to sync.
+  const seedMode = AUSPEX_MODES.includes(initialMode) ? initialMode : 'trends';
+  const [mode, setMode] = useState(seedMode);
 
   // Direction-aware scan-wipe between sub-views — same treatment the
   // app uses between slides. Compare prev vs current against AUSPEX_MODES
   // so moving rightward wipes forward, leftward wipes backward.
-  const prevModeRef = useRef('trends');
+  const prevModeRef = useRef(seedMode);
   const [modeDirection, setModeDirection] = useState('forward');
   useEffect(() => {
     if (prevModeRef.current === mode) return;

@@ -82,8 +82,14 @@ function App() {
     setIsBooting(false);
   };
 
-  const handleNavChange = (slide) => {
+  // Deep-link into a slide's sub-view (currently only Auspex has modes).
+  // Slides unmount on switch, so AuspexSlide seeds its mode state from
+  // this on mount and nothing needs to become a controlled component.
+  const [auspexMode, setAuspexMode] = useState(null);
+
+  const handleNavChange = (slide, subMode = null) => {
     AudioCore.playSFX('click');
+    if (slide === 'auspex') setAuspexMode(subMode);
     setActiveSlide(slide);
   };
 
@@ -143,14 +149,14 @@ function App() {
         user={credentials?.username}
         financeData={financeData}
       />
-      <TacticalNav activeSlide={activeSlide} setActiveSlide={handleNavChange} />
+      <TacticalNav activeSlide={activeSlide} setActiveSlide={handleNavChange} quota={financeData?.quota} />
 
       <main className="system-content-layer">
         <SlideTransition slideKey={activeSlide} direction={slideDirection}>
           <SlideErrorBoundary slideName={activeSlide}>
             {activeSlide === 'overview'  && <OverviewSlide    data={financeData} syncLed={syncLed} dbTransactions={dbs?.txns} userId={credentials?.username} />}
             {activeSlide === 'ledger'    && <LedgerSlide      data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} user={credentials?.username} />}
-            {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
+            {activeSlide === 'auspex'    && <AuspexSlide      data={financeData} dbInvestments={dbs?.inv}   dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} initialMode={auspexMode} />}
             {activeSlide === 'liquidity' && <LiquiditySlide   data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}
             {activeSlide === 'holo'      && <HoloSlide        data={financeData} db={dbs?.meta}             userId={credentials?.username} />}
             {activeSlide === 'bank'        && <BankAccountsSlide data={financeData} dbTransactions={dbs?.txns} dbMetadata={dbs?.meta} userId={credentials?.username} />}

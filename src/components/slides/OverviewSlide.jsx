@@ -495,6 +495,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
   const buckets      = data?.buckets            || {};
   const positiveCats = data?.positiveCategories || [];
   const neutralCats  = data?.neutralCategories  || [];
+  const quota        = data?.quota              || null;
 
   const income     = metrics.grossIncome  || 0;
   const expense    = metrics.grossExpense || 0;
@@ -720,7 +721,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
                 paddingTop: '8px',
                 borderTop: '1px solid var(--ba-border-lo)',
               }}>
-                <LoreTicker />
+                <LoreTicker quota={quota} />
               </div>
             </div>
 
@@ -950,6 +951,7 @@ const OverviewSlide = ({ data, syncLed, dbTransactions, userId }) => {
             txns={catTxns[vecCat] || []}
             resolveAcc={resolveAcc}
             onClose={() => setVecCat(null)}
+            quota={quota}
           />
         )}
       </div>

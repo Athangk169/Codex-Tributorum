@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { localDateStr } from '../../utils/localDate';
 import { CategorizationEngine, AREngine } from '../../utils/engine';
 import RecoveryDossier from '../shared/RecoveryDossier';
+import QuotaLine, { QUOTA_STYLES } from '../shared/QuotaLine';
+import { quotaForCategory, projectQuota } from '../../utils/quota';
 
 // ── CryptoPlaceholder ─────────────────────────────────────────
 const CryptoPlaceholder = ({ text, active }) => {
@@ -199,6 +201,21 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
   const [isDescFocused, setIsDescFocused] = useState(false);
   const [isAmtFocused,  setIsAmtFocused]  = useState(false);
   const [dossierTag,    setDossierTag]    = useState(null);
+
+  // ── Tithe check at the point of inscription ──
+  // The decree's whole purpose is to be seen *before* the spend, so the
+  // sanctioned cap for the chosen category is shown under the form and
+  // projected against the amount being typed. A reimbursable entry is
+  // excluded because getMonthlyTrends drops tagged spend from the
+  // actuals this projects against — counting it would double-warn on
+  // money that never lands in the quota.
+  const quotaLine = quotaForCategory(data?.quota, formData.category);
+  const quotaProj = quotaLine && !formData.isReimbursable
+    ? projectQuota(quotaLine, formData.amount, data?.quota?.paceFrac || 0)
+    : null;
+  // An edit already contributes its old amount to `spent`; re-projecting
+  // the full amount on top would double-count it.
+  const quotaProjActive = quotaProj && !isEditing && quotaProj.add > 0 ? quotaProj : null;
 
   const resolveSubAccountInput = (raw) => {
     const value = (raw || '').trim();
@@ -518,6 +535,7 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
       <LedgerServoSkull x={skullState.x} y={skullState.y} status={skullState.status} />
 
       <style>{`
+        ${QUOTA_STYLES}
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type="number"] { -moz-appearance: textfield; }
@@ -669,6 +687,23 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
               </select>
             </div>
 
+            {/* ── TITHE CHECK ── the sanctioned cap for this classification,
+                projected against the amount being inscribed. */}
+            {quotaLine && (
+              <div style={{ gridColumn: '1 / -1', padding: '8px 10px', border: '1px solid var(--ba-border)', background: 'rgba(0,0,0,0.25)' }}>
+                <QuotaLine
+                  line={quotaLine}
+                  proj={quotaProjActive}
+                  paceFrac={data?.quota?.paceFrac || 0}
+                />
+                {formData.isReimbursable && (
+                  <div style={{ marginTop: '6px', fontSize: '9px', color: 'var(--ba-gold-mute)', letterSpacing: '1px' }}>
+                    ✠ REIMBURSABLE — DRAWS NO TITHE
+                  </div>
+                )}
+              </div>
+            )}
+
             {isEmiCategory(formData.category) && (
               <div className="reimb-tag-row" style={{ gridColumn: '1 / -1' }}>
                 <label className="kpi-lbl">OBLIGATION TARGET // EMI PURCHASE</label>
@@ -772,11 +807,19 @@ const LedgerSlide = ({ data, dbTransactions, dbMetadata, user }) => {
               )}
               <button
                 type="submit" className="mech-btn"
-                style={{ margin: 0, borderColor: isEditing ? 'var(--amber)' : 'var(--border-hi)' }}
+                style={{
+                  margin: 0,
+                  borderColor: isEditing ? 'var(--amber)'
+                    : quotaProjActive?.projOver ? 'var(--ba-crimson)'
+                    : 'var(--border-hi)',
+                  color: !isEditing && quotaProjActive?.projOver ? 'var(--ba-crimson)' : undefined,
+                }}
                 onMouseEnter={(e) => aimSkull(e.target, 30, -10, 'idle')}
                 onMouseLeave={() => aimSkull(null)}
               >
-                {isEditing ? 'COMMIT MODIFICATION' : 'AUTHORIZE & INSCRIBE'}
+                {isEditing ? 'COMMIT MODIFICATION'
+                  : quotaProjActive?.projOver ? 'AUTHORIZE BEYOND TITHE'
+                  : 'AUTHORIZE & INSCRIBE'}
               </button>
             </div>
           </form>

@@ -54,9 +54,30 @@ const NAV_STYLES = `
     color: #c9a84c;
     text-shadow: 0 0 8px #c9a84c88;
   }
+
+  /* Breach seal — a quota is overdrawn. The app's "look here" marker,
+     rendered as a wax purity seal rather than a notification dot. */
+  .tac-seal {
+    position: absolute; top: 2px; right: 3px;
+    width: 15px; height: 15px; pointer-events: none;
+  }
+  .tac-seal img {
+    width: 100%; height: 100%; object-fit: contain;
+    mix-blend-mode: screen;
+    filter: sepia(0.6) saturate(3) hue-rotate(-35deg) brightness(0.9);
+    animation: tacSealPulse 2.4s ease-in-out infinite;
+  }
+  .tac-seal.warn img {
+    filter: sepia(0.7) saturate(1.7) hue-rotate(-12deg);
+    animation: none;
+  }
+  @keyframes tacSealPulse {
+    0%, 100% { opacity: 0.6; transform: rotate(-6deg) scale(1); }
+    50%      { opacity: 1;   transform: rotate(-6deg) scale(1.12); }
+  }
 `;
 
-export const TacticalNav = ({ activeSlide, setActiveSlide }) => {
+export const TacticalNav = ({ activeSlide, setActiveSlide, quota }) => {
   const navItems = [
     { id: 'overview',     label: 'OVERVIEW'     },
     { id: 'ledger',       label: 'LEDGER'       },
@@ -87,17 +108,35 @@ export const TacticalNav = ({ activeSlide, setActiveSlide }) => {
       }}
       onWheel={e => { e.currentTarget.scrollLeft += e.deltaY; }}  /* mouse wheel scrolls horizontally */
       >
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            className={`tac-nav-btn${activeSlide === item.id ? ' tac-active' : ''}`}
-            onClick={() => setActiveSlide(item.id)}
-          >
-            <span className="tac-bracket" style={{ marginRight: '7px' }}>[</span>
-            {item.label}
-            <span className="tac-bracket" style={{ marginLeft: '7px' }}>]</span>
-          </button>
-        ))}
+        {navItems.map((item) => {
+          // AUSPEX carries the tithe seal when a cap is breached (crimson,
+          // pulsing) or merely nearing (amber, still). Clicking it deep-links
+          // to the quota view rather than Auspex's default sub-view.
+          const sealSt = item.id === 'auspex' && quota
+            ? (quota.breached?.length ? 'over' : quota.nearing?.length ? 'warn' : null)
+            : null;
+          return (
+            <button
+              key={item.id}
+              className={`tac-nav-btn${activeSlide === item.id ? ' tac-active' : ''}`}
+              onClick={() => setActiveSlide(item.id, sealSt ? 'quota' : null)}
+              title={sealSt === 'over'
+                ? `TITHE BREACHED — ${quota.breached.map(b => b.cat).join(', ')}`
+                : sealSt === 'warn'
+                  ? `TITHE NEARING LIMIT — ${quota.nearing.map(b => b.cat).join(', ')}`
+                  : undefined}
+            >
+              <span className="tac-bracket" style={{ marginRight: '7px' }}>[</span>
+              {item.label}
+              <span className="tac-bracket" style={{ marginLeft: '7px' }}>]</span>
+              {sealSt && (
+                <span className={`tac-seal${sealSt === 'warn' ? ' warn' : ''}`} aria-hidden="true">
+                  <img src="/purity_seal.jpg" alt="" />
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
     </>
   );
